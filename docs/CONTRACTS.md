@@ -78,7 +78,7 @@ Rules (the AI system prompt and the importer both enforce / assume these):
 |---|---|---|
 | `Stage` | `({ width=1280, height=720, duration=10, fps=30, background, loop=true, autoplay=true, children })` | root. Renders a `position:relative; overflow:hidden` box of exactly width×height, scaled to fit when not embedded. In **embedded mode** (`window.__EMBED === true`, set by the preview page) it does not scale, has no scrubber/keyboard, never autoplays — time only comes from `window.__seek`. In **render mode** (`?__render=1` or `window.__RENDER_MODE`) it is bare, no chrome, hides `[data-export-hide]`. |
 | `Sprite` | `({ start=0, end=Infinity, keepMounted=false, children, ...rest })` | visible when `start <= time <= end`; otherwise returns `null` (or stays mounted hidden when `keepMounted`). `children` may be a function `({ localTime, progress, duration, visible }) => node`. **Must spread `...rest` (incl. `data-*` props) onto a wrapper `<div data-sprite style="position:absolute;inset:0">`** so `data-layer-id` lands in the DOM. `data-hidden="true"` ⇒ `display:none`. |
-| `useTime()` | `() => number` | current time (seconds) |
+| `useTime()` | `() => number` | current time (seconds). The hooks may be called in the component that renders `<Stage>` (the usual `Scene` shape) as well as anywhere inside it; outside a Stage they read the document clock (time 0 / the defaults above before a Stage mounts) |
 | `useTimeline()` | `() => { time, duration, fps, playing, setTime, setPlaying }` | |
 | `useSprite()` | `() => { localTime, progress, duration, visible }` | inside a Sprite |
 | `useStage()` | `() => StageMeta` | |
