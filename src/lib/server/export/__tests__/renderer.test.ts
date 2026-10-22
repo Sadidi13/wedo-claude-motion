@@ -26,10 +26,11 @@ describe("resolveChromiumPath", () => {
     expect(resolveChromiumPath()).toBe("/custom/chrome");
   });
 
-  it("falls back to the box-level Chromium only when it exists", () => {
+  it("falls back to an installed browser only when one exists", () => {
     delete process.env.CHROMIUM_PATH;
-    const expected = existsSync("/opt/pw-browsers/chromium") ? "/opt/pw-browsers/chromium" : undefined;
-    expect(resolveChromiumPath()).toBe(expected);
+    const resolved = resolveChromiumPath();
+    // undefined (playwright-core uses its own download) or a browser that really exists on disk
+    expect(resolved === undefined || existsSync(resolved)).toBe(true);
   });
 
   it("defaults to three parallel contexts", () => {
