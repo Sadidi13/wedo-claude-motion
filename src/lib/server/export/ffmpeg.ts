@@ -8,6 +8,8 @@
  * png-sequence format does not use ffmpeg at all: the frames are zipped.
  */
 
+import { existsSync } from "node:fs";
+import ffmpegStatic from "ffmpeg-static";
 import { spawn } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
 import { readdir } from "node:fs/promises";
@@ -45,8 +47,16 @@ const OUTPUT_FILE: Record<ExportFormat, string> = {
   "png-sequence": "output.zip",
 };
 
+/**
+ * FFMPEG_PATH wins; otherwise the binary bundled by the `ffmpeg-static` package
+ * (so Windows/macOS users need no separate install); otherwise `ffmpeg` on PATH.
+ */
 export function ffmpegPath(): string {
-  return process.env.FFMPEG_PATH || "ffmpeg";
+  if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH;
+  // ffmpeg-static exports the path of the binary it downloaded at install time
+  // (null when unsupported; missing when pnpm blocked its install script).
+  if (ffmpegStatic && existsSync(ffmpegStatic)) return ffmpegStatic;
+  return "ffmpeg";
 }
 
 /**

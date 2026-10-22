@@ -76,9 +76,12 @@ describe("runFfmpeg", () => {
     else process.env.FFMPEG_PATH = originalPath;
   });
 
-  it("reads FFMPEG_PATH and defaults to ffmpeg on PATH", () => {
+  it("reads FFMPEG_PATH, else the bundled ffmpeg-static binary, else ffmpeg on PATH", () => {
     delete process.env.FFMPEG_PATH;
-    expect(ffmpegPath()).toBe("ffmpeg");
+    const resolved = ffmpegPath();
+    // ffmpeg-static downloads its binary at install time; when pnpm blocked that
+    // script the resolver must still fall back to "ffmpeg" on PATH.
+    expect(resolved === "ffmpeg" || (resolved.includes("ffmpeg-static") && existsSync(resolved))).toBe(true);
     process.env.FFMPEG_PATH = "/opt/bin/ffmpeg";
     expect(ffmpegPath()).toBe("/opt/bin/ffmpeg");
   });

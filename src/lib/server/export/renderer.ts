@@ -47,9 +47,41 @@ const STATUS_EVERY_FRAMES = 10;
 const LAUNCH_ARGS = ["--no-sandbox", "--disable-dev-shm-usage", "--force-color-profile=srgb"];
 
 /** CHROMIUM_PATH, else the box-level Chromium, else whatever playwright-core resolves itself. */
+/** Well-known Chrome / Chromium / Edge locations, probed when CHROMIUM_PATH is not set. */
+function knownBrowserPaths(): string[] {
+  const env = process.env;
+  if (process.platform === "win32") {
+    const roots = [env["PROGRAMFILES"], env["PROGRAMFILES(X86)"], env["LOCALAPPDATA"]].filter((r): r is string => !!r);
+    return roots.flatMap((root) => [
+      `${root}\\Google\\Chrome\\Application\\chrome.exe`,
+      `${root}\\Microsoft\\Edge\\Application\\msedge.exe`,
+      `${root}\\Chromium\\Application\\chrome.exe`,
+    ]);
+  }
+  if (process.platform === "darwin") {
+    return [
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    ];
+  }
+  return [
+    FALLBACK_CHROMIUM,
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/snap/bin/chromium",
+  ];
+}
+
+/**
+ * CHROMIUM_PATH wins; otherwise the first installed browser from the known
+ * locations; otherwise undefined so playwright-core uses its own download.
+ */
 export function resolveChromiumPath(): string | undefined {
   if (process.env.CHROMIUM_PATH) return process.env.CHROMIUM_PATH;
-  return existsSync(FALLBACK_CHROMIUM) ? FALLBACK_CHROMIUM : undefined;
+  return knownBrowserPaths().find((candidate) => existsSync(candidate));
 }
 
 export function previewUrl(origin: string, jobId: string, transparent: boolean): string {

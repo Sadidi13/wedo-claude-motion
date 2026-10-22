@@ -22,8 +22,9 @@ pnpm dev                           # http://localhost:3000
 The editor opens with the bundled **Product launch** sample. Use **Import** to load your own
 animation, **Export** to render a video, **Save** to download the project as a `.zip`.
 
-Requirements: Node 22+, pnpm, and for export a Chromium/Chrome binary (`CHROMIUM_PATH`, or let
-`playwright-core` find one) plus `ffmpeg` on PATH (`FFMPEG_PATH` to override).
+Requirements: Node 22+ and pnpm. Export uses the installed Chrome / Edge / Chromium (auto-detected on
+Windows, macOS and Linux; `CHROMIUM_PATH` to override) and the ffmpeg binary bundled by `ffmpeg-static`
+(`FFMPEG_PATH` to override).
 
 ## Getting the code out of Claude
 
@@ -85,8 +86,8 @@ export default function Scene() {
 |---|---|
 | `ANTHROPIC_API_KEY` | required for Ask Claude (server side only) |
 | `MOTION_STUDIO_MODEL` | model id, default `claude-opus-5-5` |
-| `CHROMIUM_PATH` | Chromium/Chrome binary for export |
-| `FFMPEG_PATH` | ffmpeg binary, default `ffmpeg` |
+| `CHROMIUM_PATH` | browser binary for export (auto-detected when empty) |
+| `FFMPEG_PATH` | ffmpeg binary (bundled `ffmpeg-static` when empty) |
 | `MOTION_STUDIO_JOBS_DIR` | where export jobs are written, default `$TMPDIR/motion-studio/jobs` |
 
 ## Scripts

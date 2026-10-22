@@ -15,8 +15,8 @@ pnpm dev                        # http://localhost:3000
 | نیازمندی | توضیح |
 |---|---|
 | Node 22+ و pnpm | اجرای برنامه |
-| Chromium / Chrome | برای Export (اگر پیدا نشد، مسیر را در `CHROMIUM_PATH` بگذار) |
-| ffmpeg | برای Export (`FFMPEG_PATH` اگر روی PATH نیست) |
+| Chrome / Edge نصب‌شده | برای Export؛ خودکار پیدا می‌شود (در صورت نیاز `CHROMIUM_PATH`) |
+| ffmpeg | همراه پروژه نصب می‌شود (`ffmpeg-static`)؛ نیازی به نصب جدا نیست |
 | `ANTHROPIC_API_KEY` | فقط برای تب «Ask Claude» |
 
 > کلید API فقط سمت سرور خوانده می‌شود و هیچ‌وقت به مرورگر نمی‌رود.
@@ -154,6 +154,6 @@ export default function Scene() {
 |---|---|
 | «Preview error: Unsupported import 'x'» | کد از پکیجی استفاده می‌کند که در پیش‌نمایش نیست. با Ask Claude بگو «بدون x بنویس» یا پکیج را به لودر اضافه کن. |
 | تب Ask Claude می‌گوید `Set ANTHROPIC_API_KEY` | کلید را در `.env.local` بگذار و سرور را دوباره اجرا کن. |
-| Export خطای Chromium می‌دهد | `CHROMIUM_PATH` را به باینری Chrome/Chromium بده. |
+| Export خطای مرورگر می‌دهد | Chrome یا Edge نصب نیست یا در مسیر غیرمعمول است؛ `CHROMIUM_PATH` را بده. |
 | فونت فارسی در Export افتاده | فونت را به‌صورت فایل در پروژه (assets) یا لینک Google Fonts در `fonts.css` بگذار. |
 | لایه‌ای با برچسب `expr` در تایم‌لاین | زمانش با عبارت (نه عدد) نوشته شده؛ از تب Code یا Ask Claude تغییرش بده. |
