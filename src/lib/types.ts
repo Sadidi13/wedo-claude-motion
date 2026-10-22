@@ -1,0 +1,237 @@
+/**
+ * Shared data model for Motion Studio.
+ *
+ * Source of truth for a project is CODE: a Claude-Motion-style JSX file that
+ * renders a <Stage> with <Sprite> children. Layers are a *view* over that
+ * code (one layer per JSX element inside the Stage subtree, identified by a
+ * stable `data-layer-id` attribute written into the source).
+ *
+ * Every module (parser, loader/preview, editor UI, AI routes, export, importer)
+ * must build against the types in this file. See docs/CONTRACTS.md.
+ */
+
+// ---------------------------------------------------------------------------
+// Stage / project
+// ---------------------------------------------------------------------------
+
+export interface StageMeta {
+  /** canvas width in CSS px */
+  width: number;
+  /** canvas height in CSS px */
+  height: number;
+  /** total duration in seconds */
+  duration: number;
+  /** frames per second used for export + timeline snapping */
+  fps: number;
+  /** CSS background (color / gradient). Empty/undefined = transparent */
+  background?: string;
+}
+
+export type ProjectFileKind = "jsx" | "js" | "tsx" | "ts" | "css" | "html" | "json" | "asset";
+
+export interface ProjectFile {
+  /** relative path inside the project, posix style, no leading "./" (e.g. "scene.jsx", "assets/logo.png") */
+  path: string;
+  kind: ProjectFileKind;
+  /**
+   * Text content for source files.
+   * For `kind === "asset"` this is a data: URL (base64) so projects are self-contained
+   * and serialisable to JSON / localStorage.
+   */
+  content: string;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  /** path of the file that renders <Stage> (default "scene.jsx") */
+  entry: string;
+  files: Record<string, ProjectFile>;
+  /** derived from the <Stage> props of the entry file; kept in sync by the store */
+  meta: StageMeta;
+  createdAt: string;
+  updatedAt: string;
+  /** where this project came from (for UX only) */
+  origin?: "sample" | "claude-design-zip" | "html" | "jsx" | "ai-generate" | "blank";
+}
+
+// ---------------------------------------------------------------------------
+// Layers (view over the entry file's JSX)
+// ---------------------------------------------------------------------------
+
+export type LayerKind =
+  | "sprite" // <Sprite start end>
+  | "text" // element whose only children are text/expressions
+  | "image" // <img> / <Image>
+  | "shape" // <svg>, <div> with no text children, <circle> …
+  | "group" // element with element children (container)
+  | "component" // custom React component (capitalised tag, not Sprite)
+  | "element"; // anything else
+
+export interface SourceRange {
+  /** 0-based char offset in the entry file (inclusive) */
+  start: number;
+  /** 0-based char offset in the entry file (exclusive) */
+  end: number;
+  /** 1-based line of the opening tag */
+  line: number;
+}
+
+export interface LayerNode {
+  /** stable id, mirrors the `data-layer-id` attribute in the source */
+  id: string;
+  /** user-facing name: `data-layer-name` attr if present, otherwise derived (tag + text preview) */
+  name: string;
+  kind: LayerKind;
+  /** JSX element name as written ("Sprite", "div", "Title", "svg"...) */
+  tag: string;
+  /**
+   * Timing declared on THIS element (only for `<Sprite start end>` whose props are numeric literals).
+   * `undefined` when not a Sprite or when the prop is a dynamic expression.
+   */
+  start?: number;
+  end?: number;
+  /** Effective visible range in seconds after intersecting with all ancestor Sprites. */
+  range: { start: number; end: number };
+  /** `data-hidden="true"` present on the element */
+  hidden: boolean;
+  /** `data-locked="true"` present on the element (UI-only guard, ignored by runtime) */
+  locked: boolean;
+  /** first ~60 chars of static text content, for the layers panel */
+  textPreview?: string;
+  parentId: string | null;
+  depth: number;
+  children: LayerNode[];
+  /** source range of the whole JSX element (opening tag → closing tag) in the entry file */
+  loc: SourceRange;
+}
+
+export interface ParsedScene {
+  meta: StageMeta;
+  /** top-level layers = direct JSX children of <Stage> */
+  layers: LayerNode[];
+  /** flat index for O(1) lookup */
+  byId: Record<string, LayerNode>;
+  /** source range of the <Stage> element itself */
+  stageLoc: SourceRange;
+  /** non-fatal issues (e.g. dynamic Sprite timing that cannot be edited numerically) */
+  warnings: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Preview <-> editor postMessage protocol (see docs/CONTRACTS.md §3)
+// ---------------------------------------------------------------------------
+
+export interface LayerRect {
+  id: string;
+  /** rect in STAGE coordinates (CSS px of the un-scaled canvas) */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** editor -> preview iframe */
+export type EditorToPreviewMessage =
+  | { type: "load"; project: Project; time?: number }
+  | { type: "seek"; time: number }
+  | { type: "getLayerRects" }
+  | { type: "highlight"; id: string | null }
+  | { type: "setTransparent"; transparent: boolean };
+
+/** preview iframe -> editor */
+export type PreviewToEditorMessage =
+  | { type: "ready"; meta: StageMeta }
+  | { type: "layerRects"; rects: LayerRect[] }
+  | { type: "select"; id: string | null }
+  | { type: "error"; message: string; stack?: string }
+  | { type: "warning"; message: string };
+
+// ---------------------------------------------------------------------------
+// AI (server routes under /api/ai) — see docs/CONTRACTS.md §5
+// ---------------------------------------------------------------------------
+
+export type AiScope = "layer" | "scene" | "new";
+
+export interface AiChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AiEditRequest {
+  scope: AiScope;
+  /** natural-language instruction from the designer */
+  prompt: string;
+  /** full project (files + entry + meta) for context. For scope "new" may be a blank project. */
+  project: Project;
+  /** required when scope === "layer" */
+  layerId?: string;
+  /** optional prior turns for the same layer / scene so the user can iterate */
+  history?: AiChatTurn[];
+  /** optional base64 PNG screenshot of the current frame to give Claude visual context */
+  frameImage?: { mediaType: "image/png" | "image/jpeg"; data: string };
+}
+
+export interface AiEditResponse {
+  ok: true;
+  scope: AiScope;
+  /** one-paragraph description of what changed, in the user's language */
+  summary: string;
+  /** for scope "layer": the replacement JSX for that single element (same data-layer-id preserved) */
+  layerCode?: string;
+  /** for scope "scene" | "new": the full new entry-file source */
+  sceneCode?: string;
+  /** optional extra/updated source files (css, helper components) */
+  files?: { path: string; content: string }[];
+  /** usage info for the UI */
+  usage?: { inputTokens: number; outputTokens: number; model: string };
+}
+
+export interface AiErrorResponse {
+  ok: false;
+  error: string;
+  /** e.g. "missing_api_key" | "invalid_output" | "refusal" | "api_error" */
+  code: string;
+}
+
+// ---------------------------------------------------------------------------
+// Export (server routes under /api/export) — see docs/CONTRACTS.md §6
+// ---------------------------------------------------------------------------
+
+export type ExportFormat = "mp4" | "webm" | "mov" | "gif" | "png-sequence";
+
+export interface ExportOptions {
+  format: ExportFormat;
+  /** override fps (default: project.meta.fps) */
+  fps?: number;
+  /** render scale factor: 1 = native stage size, 2 = 2x (e.g. 1920x1080 -> 3840x2160) */
+  scale?: 1 | 2;
+  /** in/out points in seconds (default: whole stage) */
+  range?: { start: number; end: number };
+  /** keep alpha channel (webm / mov / png-sequence only). mp4 + gif are always opaque. */
+  transparent?: boolean;
+  /** H.264 CRF for mp4 (default 17) */
+  quality?: number;
+}
+
+export interface ExportRequest {
+  project: Project;
+  options: ExportOptions;
+}
+
+export type ExportJobState = "queued" | "rendering" | "encoding" | "done" | "error";
+
+export interface ExportJobStatus {
+  jobId: string;
+  state: ExportJobState;
+  /** 0..1 */
+  progress: number;
+  framesDone: number;
+  framesTotal: number;
+  /** present when state === "done" */
+  downloadUrl?: string;
+  fileName?: string;
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+}
