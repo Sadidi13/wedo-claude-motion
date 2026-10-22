@@ -7,6 +7,8 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["playwright-core"],
   // The preview iframe and the export renderer may open the dev server via 127.0.0.1.
   allowedDevOrigins: ["127.0.0.1", "localhost"],
+  // The dev indicator badge would otherwise be captured inside /preview frames during export.
+  devIndicators: false,
   turbopack: {
     rules: {
       "*.css": {
