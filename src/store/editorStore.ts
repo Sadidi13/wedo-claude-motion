@@ -40,7 +40,7 @@ import {
 } from "@/lib/parser";
 import type { AiChatTurn, AiScope, LayerRect, ParsedScene, Project, ProjectFile, StageMeta } from "@/lib/types";
 import { ancestorIds } from "./layerRows";
-import { createAutosaver } from "./persistence";
+import { createAutosaver, saveProject } from "./persistence";
 import {
   type ShapeKind,
   assetPathFor,
@@ -192,7 +192,17 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-const autosaver = createAutosaver();
+const autosaver = createAutosaver((project) => {
+  if (saveProject(project)) return;
+  // Typically the localStorage quota (a large image asset). Edits are kept in
+  // memory; tell the user so they can download the project as a zip.
+  useEditorStore.setState({
+    notice: {
+      kind: "error",
+      message: "Autosave failed: browser storage is full. Use Save to download the project as a .zip before reloading.",
+    },
+  });
+});
 
 // Playback loop state lives outside React / zustand: one loop per store.
 let rafHandle: number | null = null;

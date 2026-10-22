@@ -134,6 +134,8 @@ async function renderRange(
         `Seeking frame ${index}`,
       );
       if (pageErrors.length) throw new Error(`Page error while rendering frame ${index}: ${pageErrors[0]}`);
+      const renderError = await page.evaluate(() => (window as unknown as { __renderError?: string }).__renderError ?? null);
+      if (renderError) throw new Error(`Scene error while rendering frame ${index}: ${renderError}`);
       await page.screenshot({ ...shot, clip, path: path.join(framesDir, frameFileName(index, plan.frameExt)) });
       await onFrame();
     }

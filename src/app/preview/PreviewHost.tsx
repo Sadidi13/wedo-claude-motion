@@ -57,6 +57,11 @@ function describeError(error: unknown): { message: string; stack?: string } {
   return error instanceof Error ? { message: error.message, stack: error.stack } : { message: String(error) };
 }
 
+/** Make runtime errors visible to the headless export renderer (window.__renderError). */
+function exposeRenderError(message: string): void {
+  (window as unknown as { __renderError?: string }).__renderError = message;
+}
+
 // "Are we inside an iframe?" never changes, but it is only knowable in the browser:
 // a null server snapshot keeps the mode undecided until the client renders.
 const subscribeNever = () => () => {};
@@ -121,7 +126,10 @@ export default function PreviewHost() {
         try {
           const result = await loadProject(project, el, {
             transparent: transparentRef.current,
-            onError: (error) => postToEditor({ type: "error", ...error }),
+            onError: (error) => {
+              exposeRenderError(error.message);
+              postToEditor({ type: "error", ...error });
+            },
             onWarning: (message) => postToEditor({ type: "warning", message }),
           });
           const previous = mountedRef.current;
@@ -139,6 +147,7 @@ export default function PreviewHost() {
         } catch (error) {
           el.remove();
           console.error("[preview] failed to load project:", error);
+          exposeRenderError(describeError(error).message);
           postToEditor({ type: "error", ...describeError(error) });
           if (window.parent === window) setNotice(describeError(error).message);
         }

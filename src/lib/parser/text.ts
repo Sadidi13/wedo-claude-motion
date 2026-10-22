@@ -18,17 +18,20 @@ export interface TextEdit {
  * the same offset keep their array order.
  */
 export function applyEdits(source: string, edits: readonly TextEdit[]): string {
+  // Ascending order, one pass, so a file with thousands of edits (every element
+  // of a freshly imported scene gets an id) is copied once rather than per edit.
   const ordered = edits
     .map((edit, index) => ({ edit, index }))
-    .sort((a, b) => b.edit.start - a.edit.start || b.edit.end - a.edit.end || b.index - a.index);
-  let out = source;
-  let lowestApplied = Infinity;
+    .sort((a, b) => a.edit.start - b.edit.start || a.edit.end - b.edit.end || a.index - b.index);
+  const parts: string[] = [];
+  let cursor = 0;
   for (const { edit } of ordered) {
-    if (edit.end > lowestApplied) throw new Error("Overlapping text edits");
-    out = out.slice(0, edit.start) + edit.text + out.slice(edit.end);
-    lowestApplied = edit.start;
+    if (edit.start < cursor) throw new Error("Overlapping text edits");
+    parts.push(source.slice(cursor, edit.start), edit.text);
+    cursor = edit.end;
   }
-  return out;
+  parts.push(source.slice(cursor));
+  return parts.join("");
 }
 
 /** Replace `[start, end)` with `text`. */

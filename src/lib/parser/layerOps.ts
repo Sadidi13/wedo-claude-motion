@@ -119,7 +119,16 @@ export function moveLayer(source: string, id: string, move: LayerMove): string {
     const i = siblings.indexOf(el);
     const j = move.direction === "up" ? i - 1 : i + 1;
     if (j < 0 || j >= siblings.length) return source;
-    return swapSpans(source, span(el.node), span(siblings[j].node));
+    const other = siblings[j];
+    // Swapping raw spans is only safe between plain JSX children of the same
+    // container. A sibling rendered inside an expression (a .map() callback, a
+    // `cond && …` branch, a ternary arm) would be torn out of its scope.
+    if (!el.directChild || !other.directChild) {
+      throw new Error(
+        `Layer "${id}" cannot be reordered here: it or its neighbour is rendered inside an expression (.map(), condition). Edit the code instead.`,
+      );
+    }
+    return swapSpans(source, span(el.node), span(other.node));
   }
 
   if (move.parentId !== null) {

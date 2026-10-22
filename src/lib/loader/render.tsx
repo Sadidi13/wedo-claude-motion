@@ -181,10 +181,14 @@ export async function loadProject(project: Project, mount: HTMLElement, opts: Lo
     if (phase.live) opts.onError?.(info);
     else phase.initialError ??= info;
   };
+  // The Stage dispatches `motion:error` on its element (bubbles to window) or,
+  // when the stage element is not mounted yet (first-render failure), on window
+  // itself. Listening on window catches both; events from other mounts are ignored.
   const onMotionError = (event: Event) => {
+    if (event.target instanceof Node && !mount.contains(event.target)) return;
     report((event as CustomEvent<{ error: unknown }>).detail?.error);
   };
-  mount.addEventListener("motion:error", onMotionError);
+  window.addEventListener("motion:error", onMotionError);
 
   const root = createRoot(mount);
   let renderCount = 0;
@@ -200,7 +204,7 @@ export async function loadProject(project: Project, mount: HTMLElement, opts: Lo
       entry,
     );
   const unmount = () => {
-    mount.removeEventListener("motion:error", onMotionError);
+    window.removeEventListener("motion:error", onMotionError);
     root.unmount();
   };
 
