@@ -63,6 +63,9 @@ export function Canvas() {
           break;
         case "select":
           store.select(message.id);
+          // The click happened inside the iframe, which now holds keyboard focus;
+          // pull it back so the editor hotkeys (Space, arrows, Delete…) keep working.
+          containerRef.current?.focus({ preventScroll: true });
           break;
         case "error":
           store.setPreviewError(message.message, message.stack ?? null);
@@ -108,7 +111,8 @@ export function Canvas() {
   return (
     <div
       ref={containerRef}
-      className="relative min-h-0 min-w-0 overflow-hidden bg-[#0c0e13]"
+      tabIndex={-1}
+      className="relative min-h-0 min-w-0 overflow-hidden bg-[#0c0e13] outline-none"
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) useEditorStore.getState().select(null);
       }}
@@ -124,7 +128,9 @@ export function Canvas() {
             ref={iframeRef}
             title="Preview"
             src="/preview"
-            sandbox="allow-scripts allow-same-origin"
+            // Same-origin on purpose (CONTRACTS §3): the postMessage bridge is origin-checked and
+            // the export renderer opens the very same page. A sandbox with allow-same-origin +
+            // allow-scripts would add nothing but a browser warning.
             onLoad={() => setFrameLoaded(true)}
             width={meta.width}
             height={meta.height}
