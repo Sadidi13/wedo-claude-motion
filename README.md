@@ -51,9 +51,10 @@ Claude follows the `motion-studio` skill (`.claude/skills/motion-studio/SKILL.md
 `scripts/motion-bridge.mjs`. Answers pass the same validation as API replies. Design and routes:
 `docs/CLAUDE-DESKTOP.md`.
 
-The regular Claude chat in Claude Desktop works too, through an MCP connector. Run
-`node scripts/motion-bridge.mjs install-chat` once and restart Claude Desktop. Then ask the chat for a
-video, or say "listen to Motion Studio" / "check Motion Studio" to answer requests from the editor.
+The regular Claude chat in Claude Desktop works too, through an MCP connector. On Windows,
+double-click `scripts/connect-claude-chat.cmd` once and quit Claude when it asks; elsewhere, quit Claude
+Desktop and run `node scripts/motion-bridge.mjs install-chat`. Then ask the chat for a video, or say
+"listen to Motion Studio" / "check Motion Studio" to answer requests from the editor.
 
 ## How it works
 

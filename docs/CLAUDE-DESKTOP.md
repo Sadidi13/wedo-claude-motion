@@ -63,7 +63,14 @@ checkbox switches the tab to `/api/ai/edit`.
 ## Claude chat connector (MCP)
 
 The regular chat cannot run commands, so it talks to the bridge through an MCP server that Claude
-Desktop starts. Register it once, then quit Claude Desktop completely and open it again:
+Desktop starts. Claude Desktop keeps its config in memory and writes it back whenever it saves its own
+settings, so the connector must be registered while the app is closed:
+
+- **Windows:** double-click `scripts/connect-claude-chat.cmd`. It waits until you quit Claude (tray
+  icon, then Quit), registers the connector, starts Motion Studio in its own window if it is not
+  running, and opens Claude again.
+- **Anywhere:** quit Claude Desktop, then run the command below and open Claude again. It refuses
+  while Claude Desktop is running (`--force` overrides).
 
 ```bash
 node scripts/motion-bridge.mjs install-chat

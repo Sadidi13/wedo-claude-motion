@@ -17,9 +17,11 @@
  *                                  open a new layered scene in the editor
  *   edit <scene.jsx|element.jsx> --summary <text> [--prompt <text>] [--layer <id>] [--file ...]
  *                                  change the open project (whole entry file, or one layer)
- *   install-chat [--config <claude_desktop_config.json>]
- *                                  register the MCP connector in Claude Desktop (backs the file up)
+ *   install-chat [--config <claude_desktop_config.json>] [--force]
+ *                                  register the MCP connector in Claude Desktop (backs the file up).
+ *                                  Claude Desktop must be closed: it overwrites the file while running.
  */
+import { execFileSync } from "node:child_process";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -226,7 +228,42 @@ async function findClaudeDesktopConfigs() {
   return { found: found.map((f) => f.file), fallback: candidates.at(-1) };
 }
 
+/**
+ * Is the Claude desktop app running? It keeps its config in memory and writes it back when it saves
+ * its own settings, which would drop a connector added meanwhile. (Claude Code sessions, including
+ * this one when run from the app, live elsewhere and do not count.)
+ */
+function claudeDesktopRunning() {
+  try {
+    if (process.platform === "win32") {
+      // Store build: ...\WindowsApps\Claude_<version>\app\claude.exe; installer build: ...\AnthropicClaude\...
+      const script =
+        "@(Get-Process claude -ErrorAction SilentlyContinue | Where-Object { " +
+        "$_.Path -like '*\\WindowsApps\\Claude_*' -or $_.Path -like '*\\AnthropicClaude\\*' }).Count";
+      const output = execFileSync("powershell.exe", ["-NoProfile", "-Command", script], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      return Number(output.trim()) > 0;
+    }
+    if (process.platform === "darwin") {
+      execFileSync("pgrep", ["-x", "Claude"], { stdio: "ignore" });
+      return true;
+    }
+  } catch {
+    return false; // pgrep exits 1 when nothing matches; any other failure: do not block
+  }
+  return false;
+}
+
 async function cmdInstallChat(flags) {
+  if (!flags.force && claudeDesktopRunning()) {
+    throw new CliError(
+      "Claude Desktop is running, and it overwrites its config file when it saves its own settings, so the " +
+        "connector would be lost. Quit it completely first (tray icon, then Quit) and run this again, or " +
+        "double-click scripts/connect-claude-chat.cmd, which waits for that. --force writes anyway.",
+    );
+  }
   const { found, fallback } = await findClaudeDesktopConfigs();
   const file = flags.config ? path.resolve(flags.config) : (found[0] ?? fallback);
   let config = {};
@@ -249,7 +286,7 @@ async function cmdInstallChat(flags) {
   console.log(`config:    ${file}`);
   console.log(`connector: motion-studio → ${server.command} ${server.args[0]}`);
   if (found.length > 1) console.log(`other configs left unchanged: ${found.slice(1).join(", ")}`);
-  console.log("Quit Claude Desktop completely (tray icon → Quit) and open it again to load the connector.");
+  console.log("Open Claude Desktop now; the connector loads when it starts.");
 }
 
 const COMMANDS = {
