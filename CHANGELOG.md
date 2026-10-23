@@ -6,7 +6,7 @@ All notable changes to WeDo Claude Motion. The format follows
 
 ## [0.1.0] — unreleased
 
-First public release.
+First public release, under the MIT license.
 
 ### Editor
 - Import Claude Design project archives, standalone HTML and JSX scenes; every element becomes a layer.

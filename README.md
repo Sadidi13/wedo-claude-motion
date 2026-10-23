@@ -28,7 +28,7 @@ Module contracts: `docs/CONTRACTS.md`. Security: `SECURITY.md`.
 Requirements: Node 22+, pnpm, Chrome / Edge / Chromium (for export).
 
 ```bash
-git clone https://github.com/Sadidi13/ai-website.git wedo-claude-motion
+git clone https://github.com/Sadidi13/wedo-claude-motion.git
 cd wedo-claude-motion
 pnpm install
 pnpm dev                           # http://localhost:3000
@@ -172,7 +172,7 @@ and how to report a vulnerability.
 
 ## License and third-party software
 
-See `LICENSE`. Export uses the ffmpeg build downloaded by `ffmpeg-static` at install time (GPL);
+MIT, see `LICENSE`. Export uses the ffmpeg build downloaded by `ffmpeg-static` at install time (GPL);
 it is not part of this repository, but bundling it into an app has GPL obligations.
 
 ## Keyboard
