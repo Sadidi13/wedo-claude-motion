@@ -15,7 +15,7 @@
     "bridge": "node scripts/motion-bridge.mjs",
     "autopilot": "node scripts/motion-autopilot.mjs",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
