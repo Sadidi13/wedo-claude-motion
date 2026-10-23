@@ -256,6 +256,8 @@ export interface BridgeStatus {
   lastSeen: number | null;
   /** who polled last: a Code session ("cli"), the chat connector ("mcp") or the autopilot ("headless") */
   listenerClient: BridgeClient | null;
+  /** an editor tab polled for events within the last few seconds */
+  editorOpen: boolean;
   /** requests waiting to be claimed */
   pending: number;
   /** the project the editor last shared with the server */

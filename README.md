@@ -1,23 +1,46 @@
-# Motion Studio
+# WeDo Claude Motion
 
-Layer-based editor for **Claude Motion / Claude Design** animations.
+**A layer editor for Claude-made animations.** Ask Claude for a video, get a project where every
+element is its own layer, fix it by hand or by asking Claude again, and export MP4, WebM, MOV,
+GIF or PNG frames. Works with your Claude subscription: no API key needed.
+
+> Independent project, not affiliated with or endorsed by Anthropic. Claude is a trademark of
+> Anthropic, PBC.
 
 Claude Motion writes animations as code (a `<Stage>` with `<Sprite>` children, a pure function of
-time) but exports a flat MP4. Motion Studio imports that code instead, shows every element as an
-editable **layer** (layers panel + timeline), lets you add / delete / retime / reorder / hide layers
-by hand, and lets Claude rewrite **just the layer you selected** from a prompt. Export renders
-frames headlessly in Chromium and encodes MP4 / WebM (alpha) / MOV ProRes 4444 (alpha) / GIF /
-PNG sequence.
+time) but exports a flat MP4. WeDo Claude Motion (the editor is called Motion Studio in the code)
+imports that code instead, shows every element as an editable **layer** (layers panel + timeline),
+lets you add / delete / retime / reorder / hide layers by hand, and lets Claude rewrite **just the
+layer you selected** from a prompt. Export renders frames headlessly in Chromium and encodes
+MP4 / WebM (alpha) / MOV ProRes 4444 (alpha) / GIF / PNG sequence.
 
-Persian product proposal: `docs/PROPOSAL.fa.md`. Module contracts: `docs/CONTRACTS.md`.
+- **From Claude to layers:** "make a 6 s teaser for my café" in the Claude chat or Claude Code opens
+  the editor in your browser with the scene, one layer per element.
+- **From layers back to Claude:** write in the editor's Ask Claude tab; the autopilot (or a Claude
+  session) answers and the change is applied, one Undo away.
+- **Local and private:** everything runs on your computer; the server only answers on 127.0.0.1.
+
+Persian user guide: `docs/USER-GUIDE.fa.md`. Claude integrations: `docs/CLAUDE-DESKTOP.md`.
+Module contracts: `docs/CONTRACTS.md`. Security: `SECURITY.md`.
 
 ## Quick start
 
+Requirements: Node 22+, pnpm, Chrome / Edge / Chromium (for export).
+
 ```bash
+git clone https://github.com/Sadidi13/ai-website.git wedo-claude-motion
+cd wedo-claude-motion
 pnpm install
-cp .env.example .env.local        # optional: ANTHROPIC_API_KEY, only if you do not use Claude Desktop
 pnpm dev                           # http://localhost:3000
 ```
+
+On Windows, after `pnpm install`, double-click `scripts/start-autopilot.cmd`: it starts the editor
+and the autopilot, and signs Claude Code in the first time. To use the regular Claude chat as well,
+double-click `scripts/connect-claude-chat.cmd` once (it asks you to quit Claude while it registers
+the connector).
+
+`cp .env.example .env.local` is optional: it is only needed for `ANTHROPIC_API_KEY`, if you want the
+Ask Claude tab to use the Anthropic API instead of your Claude subscription.
 
 The editor opens with the bundled **Product launch** sample. Use **Import** to load your own
 animation, **Export** to render a video, **Save** to download the project as a `.zip`.
@@ -112,6 +135,11 @@ export default function Scene() {
 | `FFMPEG_PATH` | ffmpeg binary (bundled `ffmpeg-static` when empty) |
 | `MOTION_STUDIO_JOBS_DIR` | where export jobs are written, default `$TMPDIR/motion-studio/jobs` |
 | `MOTION_STUDIO_BRIDGE_DIR` | Claude Desktop bridge state, default `.motion-bridge/state` in the repo |
+| `MOTION_STUDIO_AUTOPILOT_MODEL` | model for the autopilot (`sonnet` uses less of your plan than the default) |
+| `MOTION_STUDIO_CLAUDE_BIN` | Claude Code binary for the autopilot when `claude` is not on PATH |
+| `MOTION_STUDIO_ALLOWED_HOSTS` | extra host names the server answers to (default: localhost only) |
+| `MOTION_STUDIO_CHROMIUM_NO_SANDBOX` | `1` turns Chromium's sandbox off for export (only for containers that need it) |
+| `MOTION_STUDIO_ALLOW_REMOTE` | `1` lets the CLI send the bridge token to a non-local http server (not recommended) |
 
 ## Scripts
 
@@ -122,8 +150,30 @@ pnpm start      # serve the build
 pnpm test       # vitest (parser, loader, importer, samples, store, AI service, export)
 pnpm typecheck  # tsc --noEmit
 pnpm lint       # eslint
-pnpm bridge     # Claude Desktop bridge CLI (status | contract | project | wait | respond | fail | new | edit)
+pnpm bridge     # Claude Desktop bridge CLI (status | contract | project | wait | respond | fail | new | edit | install-chat)
+pnpm autopilot  # answer the Ask Claude tab automatically with Claude Code
 ```
+
+## Security
+
+The editor is a local tool, so the server is locked to this machine:
+
+- It listens on 127.0.0.1 and answers only to `localhost` host names (no LAN access, no DNS rebinding).
+- `/api` refuses requests from other web sites, non-JSON writes and bodies over 64 MB.
+- Routes that act for Claude need a random token stored in the repository's `.motion-bridge/state`.
+- Claude's answers are validated before the editor applies them; the autopilot runs Claude Code
+  with no tools, no MCP servers and no settings, in an empty temporary folder.
+- Export runs Chromium with its sandbox on and blocks the rendered scene from calling the app's API;
+  stage size, duration, frame count and concurrent exports are capped.
+
+**Imported projects run code.** A project is JavaScript that runs inside the editor, like opening an
+HTML file. Only import projects from people you trust. See `SECURITY.md` for the full threat model
+and how to report a vulnerability.
+
+## License and third-party software
+
+See `LICENSE`. Export uses the ffmpeg build downloaded by `ffmpeg-static` at install time (GPL);
+it is not part of this repository, but bundling it into an app has GPL obligations.
 
 ## Keyboard
 

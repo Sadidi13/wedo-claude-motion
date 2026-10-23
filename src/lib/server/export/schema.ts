@@ -8,29 +8,45 @@
  */
 
 import { z } from "zod";
+import { isUnsafePath } from "@/lib/importer/files";
 import type { ExportRequest } from "@/lib/types";
 
-/** Thrown for a malformed request; routes map it to HTTP 400. */
+/** Thrown for a malformed or too-large request; routes map it to `status` (400 by default). */
 export class ExportRequestError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly status = 400,
+  ) {
     super(message);
     this.name = "ExportRequestError";
   }
 }
 
+/** Ceilings that keep one export from exhausting the machine; far above any real motion piece. */
+export const EXPORT_LIMITS = {
+  maxSide: 4096,
+  maxDurationSeconds: 600,
+  maxFps: 120,
+  maxFrames: 36_000,
+} as const;
+
 const positive = z.number().finite().positive();
 
 const projectFileSchema = z.object({
-  path: z.string().min(1),
+  path: z
+    .string()
+    .min(1)
+    .max(400)
+    .refine((p) => !isUnsafePath(p) && !/[\u0000-\u001f\u007f]/.test(p), "path must stay inside the project"),
   kind: z.enum(["jsx", "js", "tsx", "ts", "css", "html", "json", "asset"]),
   content: z.string(),
 });
 
 const stageMetaSchema = z.object({
-  width: positive,
-  height: positive,
-  duration: positive,
-  fps: positive,
+  width: positive.max(EXPORT_LIMITS.maxSide),
+  height: positive.max(EXPORT_LIMITS.maxSide),
+  duration: positive.max(EXPORT_LIMITS.maxDurationSeconds),
+  fps: positive.max(EXPORT_LIMITS.maxFps),
   background: z.string().optional(),
 });
 

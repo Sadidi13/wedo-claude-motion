@@ -1,11 +1,12 @@
 {
-  "name": "motion-studio",
+  "name": "wedo-claude-motion",
   "version": "0.1.0",
+  "description": "Layer-based editor for Claude Motion animations, connected to Claude Desktop and Claude Code",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
-    "start": "next start",
+    "start": "next start --hostname 127.0.0.1",
     "bridge": "node scripts/motion-bridge.mjs",
     "autopilot": "node scripts/motion-autopilot.mjs",
     "lint": "eslint",

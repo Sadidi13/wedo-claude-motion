@@ -1,6 +1,6 @@
 ---
 name: motion-studio
-description: Build and edit animations in the Motion Studio editor running on localhost:3000, and answer the requests a designer sends from its Ask Claude tab. Use for any request in this workspace to make or change a video, animation, motion graphic, promo, teaser, intro, title card or reel (the user wants these created as layer-based Motion Studio scenes, not rendered video files), for "listen to Motion Studio" / "به موشن استودیو گوش بده", and whenever a `motion-bridge wait` background task finishes.
+description: Build and edit animations in WeDo Claude Motion (the Motion Studio editor on localhost:3000), and answer the requests a designer sends from its Ask Claude tab. Use for any request in this workspace to make or change a video, animation, motion graphic, promo, teaser, intro, title card or reel (the user wants these created as layer-based Motion Studio scenes, not rendered video files), for "check Claude Motion" / «کلاد موشن رو چک کن», for "listen to Motion Studio" / "به موشن استودیو گوش بده", and whenever a `motion-bridge wait` background task finishes.
 ---
 
 # Motion Studio bridge
@@ -35,7 +35,9 @@ if the editor shows "Autopilot", do not also run `wait`.
 3. `new .motion-bridge/drafts/<slug>.jsx --name "<short title>" --summary "<one paragraph, in the user's language>"`.
    Helper files: add `--file styles.css=.motion-bridge/drafts/styles.css` (repeatable).
 4. A validation error means the code breaks the contract. Fix it and run `new` again.
-5. The editor opens it as a new project within about two seconds. Tell the user it is in Motion Studio.
+5. `new` starts the editor if it is not running and opens it in the browser when no editor tab is
+   open; otherwise the open tab loads the scene within about two seconds.
+6. End your reply with the next-step note `new` prints, in the user's language (Persian text as is).
 
 ## 2. A change to the open scene asked for in the chat
 
@@ -45,7 +47,16 @@ if the editor shows "Autopilot", do not also run `wait`.
    `edit <file> --summary "..." --prompt "<the user's words>"`.
 3. One layer: copy exactly that element, from its opening tag through its closing tag. Change it and
    keep every `data-layer-id`. Then `edit <file> --layer <root data-layer-id> --summary "..." --prompt "..."`.
-4. Each edit is a single Undo in the editor.
+4. Each edit is a single Undo in the editor. `edit` also opens the browser when no editor tab is open.
+5. End your reply with the next-step note `edit` prints, in the user's language.
+
+## 2b. "Check Claude Motion"
+
+When the user says "check Claude Motion", "check Motion Studio", «کلاد موشن رو چک کن» or
+«موشن استودیو رو چک کن», handle what the designer queued in the Ask Claude tab: run `wait` once
+(it returns at once when something is queued), answer it as in section 3, and repeat until `status`
+shows 0 queued. Do not keep listening afterwards unless asked. If the editor shows "Autopilot", the
+autopilot already answers requests: tell the user instead of competing with it.
 
 ## 3. Listening to the editor's Ask Claude tab
 

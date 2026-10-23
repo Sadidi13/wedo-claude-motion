@@ -19,6 +19,7 @@ import {
   pushNewScene,
   readJsonBody,
   requireToken,
+  touchEditor,
 } from "@/lib/server/bridge";
 
 export async function GET(request: NextRequest): Promise<Response> {
@@ -26,6 +27,8 @@ export async function GET(request: NextRequest): Promise<Response> {
   const after = request.nextUrl.searchParams.get("after");
   const cursor = after === null ? null : after === "" || isValidBridgeId(after) ? after : null;
   if (after !== null && cursor === null) return Response.json({ error: "Invalid cursor" }, { status: 400 });
+  // Only the editor polls this route, so it doubles as the editor's heartbeat.
+  await touchEditor();
   return Response.json(await eventsAfter(cursor), { headers: NO_STORE });
 }
 

@@ -5,6 +5,7 @@
  * `index.html` shell and a README that says plainly what the shell needs.
  */
 import JSZip from "jszip";
+import { PRODUCT_NAME } from "@/lib/brand";
 import type { Project } from "@/lib/types";
 import { dataUrlToBytes } from "./dataUrl";
 import { normaliseProjectPath } from "./files";
@@ -24,7 +25,7 @@ function standaloneIndexHtml(project: Project): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${title} — Motion Studio export</title>
+<title>${title} — ${PRODUCT_NAME} export</title>
 <script type="importmap">
 {
   "imports": {

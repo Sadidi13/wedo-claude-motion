@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
+import { PRODUCT_NAME, PRODUCT_TAGLINE } from "@/lib/brand";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Motion Studio",
-  description:
-    "Layer-based editor for Claude Motion animations: edit layers by hand or ask Claude to rewrite one.",
+  title: PRODUCT_NAME,
+  description: PRODUCT_TAGLINE,
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

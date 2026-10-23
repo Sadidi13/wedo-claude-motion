@@ -16,16 +16,17 @@
  * MOTION_STUDIO_URL / MOTION_STUDIO_BRIDGE_DIR of the bridge client.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { existsSync, rmSync } from "node:fs";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { BASE, BridgeError, BridgeValidationError, SCRATCH, answer, claim, decline, getContract, sleep } from "./lib/bridge-client.mjs";
+import { BASE, BridgeError, BridgeValidationError, answer, claim, decline, getContract, sleep } from "./lib/bridge-client.mjs";
 
 const RUN_TIMEOUT_MS = 10 * 60_000;
 const POLL_MS = 1_000;
-const WORK_DIR = path.join(SCRATCH, "autopilot");
-const CONTRACT_FILE = path.join(WORK_DIR, "system-prompt.md");
+/** Private, empty working folder (created at start): no project files, CLAUDE.md or settings around Claude Code. */
+let WORK_DIR = "";
+let CONTRACT_FILE = "";
 
 function parseFlags(argv) {
   const flags = {};
@@ -91,7 +92,20 @@ function checkLogin(bin) {
 
 /** One `claude -p` run. Resolves with the model's text; rejects with a readable message. */
 function runClaude(bin, prompt, model) {
-  const args = ["-p", "--output-format", "json", "--system-prompt-file", CONTRACT_FILE, "--tools", "", "--strict-mcp-config", "--no-session-persistence"];
+  // No tools, no MCP servers, no settings/hooks/CLAUDE.md, no saved session: a request can only produce text.
+  const args = [
+    "-p",
+    "--output-format",
+    "json",
+    "--system-prompt-file",
+    CONTRACT_FILE,
+    "--tools",
+    "",
+    "--strict-mcp-config",
+    "--setting-sources",
+    "",
+    "--no-session-persistence",
+  ];
   if (model) args.push("--model", model);
   return new Promise((resolve, reject) => {
     const child = spawnClaude(bin, args, { cwd: WORK_DIR, env: childEnv(), stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
@@ -209,7 +223,11 @@ async function main() {
     return;
   }
 
-  await mkdir(WORK_DIR, { recursive: true });
+  WORK_DIR = await mkdtemp(path.join(os.tmpdir(), "wedo-autopilot-"));
+  CONTRACT_FILE = path.join(WORK_DIR, "system-prompt.md");
+  const cleanup = () => rmSync(WORK_DIR, { recursive: true, force: true });
+  process.once("exit", cleanup);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGBREAK"]) process.once(signal, () => process.exit(130));
   let warned = false;
   for (;;) {
     try {

@@ -29,15 +29,18 @@ import {
   BASE,
   BridgeError,
   BridgeValidationError,
+  NEXT_STEP_NOTE,
   REPO,
   SCRATCH,
   answer,
   claim,
   decline,
+  ensureServer,
   getContract,
   getProject,
   getStatus,
   push,
+  showInEditor,
   sleep,
 } from "./lib/bridge-client.mjs";
 
@@ -84,12 +87,24 @@ function need(value, message) {
   return value;
 }
 
-async function writeOut(relative, content) {
-  const file = path.join(SCRATCH, relative);
+/**
+ * Write `relative` inside SCRATCH/`folder`, refusing any path that would land outside that folder.
+ * Project file paths come from the editor (and so, potentially, from an imported project): the
+ * server rejects unsafe ones, and this check makes sure a path can never escape here either.
+ */
+async function writeInside(folder, relative, content) {
+  const root = path.resolve(SCRATCH, folder);
+  const file = path.resolve(root, relative);
+  const rel = path.relative(root, file);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new CliError(`Refusing to write "${relative}": it is outside ${root}`);
+  }
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, content, "utf8");
   return file;
 }
+
+const writeOut = (relative, content) => writeInside(".", relative, content);
 
 // ---------------------------------------------------------------------------
 
@@ -113,7 +128,7 @@ async function cmdProject() {
   const skipped = [];
   for (const file of Object.values(project.files)) {
     if (file.kind === "asset") skipped.push(file.path);
-    else await writeOut(path.join("project", file.path), file.content);
+    else await writeInside("project", file.path, file.content);
   }
   await writeOut(path.join("project", "_project.json"), JSON.stringify({ ...project, files: Object.keys(project.files) }, null, 2));
   const m = project.meta;
@@ -142,9 +157,10 @@ async function cmdWait(flags) {
       await sleep(interval);
       continue;
     }
+    if (!/^[0-9a-z]{15}$/.test(r.id)) throw new CliError(`Unexpected request id "${r.id}"`);
     const dir = path.join("requests", r.id);
     const brief = await writeOut(path.join(dir, "brief.md"), r.brief);
-    for (const file of r.files) await writeOut(path.join(dir, "files", file.path), file.content);
+    for (const file of r.files) await writeInside(path.join(dir, "files"), file.path, file.content);
     console.log(`MOTION_STUDIO_REQUEST ${r.id}`);
     console.log(`scope:   ${r.scope}${r.layerId ? `  layer: ${r.layerId}${r.layerName ? ` "${r.layerName}"` : ""}` : ""}`);
     console.log(`project: "${r.project.name}" (${r.project.id})`);
@@ -172,21 +188,37 @@ async function cmdFail(positional) {
   console.log(`OK: request ${id} declined.`);
 }
 
+/** Start the server when needed, push, open the editor in the browser if no tab is open, print the next-step note. */
+async function pushAndShow(body) {
+  const { started } = await ensureServer();
+  if (started) console.log(`Started the dev server in ${REPO}.`);
+  const json = await push(body);
+  const opened = await showInEditor(json.eventId);
+  return { json, where: opened ? "opened the editor in the browser" : "the open editor tab applies it within two seconds" };
+}
+
+function printNextStepNote() {
+  console.log("\nEnd your reply to the user with this note, in their language:");
+  console.log(`FA: ${NEXT_STEP_NOTE.fa}`);
+  console.log(`EN: ${NEXT_STEP_NOTE.en}`);
+}
+
 async function cmdNew(positional, flags) {
   const file = need(positional[0], "new <scene.jsx> --name <name> --summary <text>");
-  const json = await push({
+  const { json, where } = await pushAndShow({
     type: "project",
     name: need(flags.name, "--name is required"),
     summary: need(flags.summary, "--summary is required"),
     code: await readLocal(file),
     files: await extraFiles(flags.file),
   });
-  console.log(`OK: new scene queued for the editor (${json.layers} top-level layers, project ${json.projectId}).`);
+  console.log(`OK: new scene created (${json.layers} top-level layers, project ${json.projectId}); ${where}.`);
+  printNextStepNote();
 }
 
 async function cmdEdit(positional, flags) {
   const file = need(positional[0], "edit <file> --summary <text> [--prompt <text>] [--layer <id>]");
-  const json = await push({
+  const { json, where } = await pushAndShow({
     type: "edit",
     summary: need(flags.summary, "--summary is required"),
     prompt: flags.prompt ?? "",
@@ -194,7 +226,8 @@ async function cmdEdit(positional, flags) {
     code: await readLocal(file),
     files: await extraFiles(flags.file),
   });
-  console.log(`OK: edit queued for project ${json.projectId}; the editor applies it within a second (one Undo reverts it).`);
+  console.log(`OK: edit sent to project ${json.projectId}; ${where} (one Undo reverts it).`);
+  printNextStepNote();
 }
 
 /** Existing Claude Desktop config files, most recently written first. */

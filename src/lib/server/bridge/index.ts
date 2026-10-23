@@ -17,10 +17,12 @@ export {
   finishRequest,
   isValidBridgeId,
   isValidToken,
+  readEvent,
   readRequest,
   readSyncedProject,
   syncProject,
   toView,
+  touchEditor,
   type BridgeRequestRecord,
   type SyncedProject,
 } from "./store";

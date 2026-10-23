@@ -13,11 +13,14 @@ import { encode } from "./ffmpeg";
 import { createJob, jobDir, readOptions, readProject, readStatus, writeStatus } from "./jobs";
 import { resolvePlan } from "./plan";
 import { renderJob } from "./renderer";
+import { ExportRequestError } from "./schema";
 
 export { isValidJobId, readProject, readStatus } from "./jobs";
 export { ExportRequestError } from "./schema";
 
 const running = new Set<string>();
+/** Each export runs its own Chromium with several pages; one at a time keeps the machine usable. */
+export const MAX_RUNNING_EXPORTS = 1;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -48,6 +51,8 @@ async function runExportJob(jobId: string, origin: string): Promise<void> {
     });
   } catch (error) {
     console.error(`[export] job ${jobId} failed:`, error);
+    // Frames of a failed job are useless and can be large.
+    await rm(path.join(jobDir(jobId), "frames"), { recursive: true, force: true }).catch(() => undefined);
     await writeStatus(jobId, { state: "error", error: errorMessage(error), finishedAt: new Date().toISOString() }).catch(
       (statusError: unknown) => console.error(`[export] could not record failure of job ${jobId}:`, statusError),
     );
@@ -62,6 +67,9 @@ async function runExportJob(jobId: string, origin: string): Promise<void> {
  * `origin` is where `/preview` is served (the incoming request's origin).
  */
 export async function startExport(request: unknown, origin: string): Promise<string> {
+  if (running.size >= MAX_RUNNING_EXPORTS) {
+    throw new ExportRequestError("Another export is still running. Wait for it to finish, then try again.", 429);
+  }
   const { jobId } = await createJob(request);
   // Fire-and-forget: every pipeline failure is recorded in status.json; only the
   // duplicate-start guard can reject here, and it must not become an unhandled rejection.

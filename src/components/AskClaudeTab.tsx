@@ -89,7 +89,7 @@ function waitingText(status: BridgeStatus | null, recentlyActive: boolean): stri
   if (status?.listener === "listening") return `Sent to ${who}…`;
   if (status?.listener === "busy") return `${who} is working on it…`;
   if (recentlyActive) return `Queued. ${who} will pick it up as soon as it finishes the previous request.`;
-  return "Queued. Nobody is listening yet: start the autopilot (scripts/start-autopilot.cmd), or say “check Motion Studio” in the Claude chat.";
+  return "Queued. Nobody is listening yet: start the autopilot (scripts/start-autopilot.cmd), or say “check Claude Motion” in the Claude chat.";
 }
 
 export function AskClaudeTab() {
@@ -273,7 +273,7 @@ export function AskClaudeTab() {
           <p dir="auto" className="rounded border border-accent-2/40 bg-accent-2/10 px-2 py-1 text-[11px] leading-[1.45] text-accent-2">
             Nobody is listening. Start the autopilot by double-clicking{" "}
             <span className="font-medium">scripts/start-autopilot.cmd</span>: it answers every request on its own and costs
-            nothing while waiting. Or, in the Claude chat, say <span className="font-medium">“check Motion Studio”</span> after
+            nothing while waiting. Or, in the Claude chat, say <span className="font-medium">“check Claude Motion”</span> after
             sending. Requests you send now wait in the queue.
           </p>
         )}

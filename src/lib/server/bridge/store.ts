@@ -9,6 +9,7 @@
  *   token               random secret; the CLI-only routes require it
  *   project.json        the project the editor last shared ({ project, syncedAt })
  *   listener.json       { lastSeen, client } — heartbeat of whoever claims requests
+ *   editor.json         { lastSeen } — heartbeat of the open editor tab (its event polls)
  *   requests/<id>.json  one Ask Claude request from the editor and its outcome
  *   events/<id>.json    scenes / edits Claude pushed from the desktop chat
  *
@@ -34,12 +35,19 @@ import type {
 
 /** A listener that polled within this window counts as "listening". */
 export const LISTENER_TTL_MS = 5_000;
+/**
+ * An editor tab polls events every 1.5 s, but browsers throttle timers in background tabs (down to
+ * once a minute), so a tab seen within this window counts as open; tools then avoid opening a second one.
+ */
+export const EDITOR_TTL_MS = 75_000;
 /** A claimed request older than this no longer makes the listener "busy". */
 export const CLAIM_TTL_MS = 30 * 60_000;
 /** How many pushed events are kept on disk. */
 export const MAX_EVENTS = 50;
-/** Finished requests older than this are deleted when a new one is created. */
+/** Requests older than this (finished, or never answered) are deleted when a new one is created. */
 export const FINISHED_REQUEST_TTL_MS = 24 * 60 * 60_000;
+/** The queue refuses new requests beyond this many waiting ones. */
+export const MAX_PENDING_REQUESTS = 20;
 
 export const BRIDGE_ID_PATTERN = /^[0-9a-z]{15}$/;
 export const TOKEN_HEADER = "x-motion-bridge-token";
@@ -151,10 +159,11 @@ export async function bridgeToken(): Promise<string> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
-  await mkdir(bridgeRoot(), { recursive: true });
+  // Owner-only permissions where the OS has them (POSIX); on Windows the user profile already is.
+  await mkdir(bridgeRoot(), { recursive: true, mode: 0o700 });
   const token = randomBytes(24).toString("hex");
   try {
-    await writeFile(file, token, { encoding: "utf8", flag: "wx" });
+    await writeFile(file, token, { encoding: "utf8", flag: "wx", mode: 0o600 });
     return token;
   } catch (error) {
     // Another request created it first: use that one.
@@ -195,18 +204,32 @@ export function toView(record: BridgeRequestRecord): BridgeRequestView {
   return view;
 }
 
-async function pruneFinishedRequests(now: number): Promise<void> {
+/**
+ * Delete finished requests older than FINISHED_REQUEST_TTL_MS and requests nobody answered within
+ * the same time (stale queue entries would otherwise wait forever). Returns the pending count left.
+ */
+async function pruneRequests(now: number): Promise<number> {
+  let pending = 0;
   for (const id of await listIds(requestsDir())) {
     const record = await readJson<BridgeRequestRecord>(requestFile(id));
-    if (!record || record.state === "pending" || record.state === "claimed") continue;
-    const finished = Date.parse(record.finishedAt ?? record.createdAt);
-    if (now - finished > FINISHED_REQUEST_TTL_MS) await rm(requestFile(id), { force: true });
+    if (!record) continue;
+    const open = record.state === "pending" || record.state === "claimed";
+    const since = Date.parse(open ? record.createdAt : (record.finishedAt ?? record.createdAt));
+    if (now - since > FINISHED_REQUEST_TTL_MS) {
+      await rm(requestFile(id), { force: true });
+      continue;
+    }
+    if (record.state === "pending") pending++;
   }
+  return pending;
 }
 
 export function createRequest(request: AiEditRequest, now = new Date()): Promise<BridgeRequestRecord> {
   return serial(async () => {
-    await pruneFinishedRequests(now.getTime());
+    const pending = await pruneRequests(now.getTime());
+    if (pending >= MAX_PENDING_REQUESTS) {
+      throw new BridgeStateError(`${pending} requests are already waiting; let Claude answer them or cancel some first`, 429);
+    }
     const record: BridgeRequestRecord = {
       id: newBridgeId(now.getTime()),
       state: "pending",
@@ -280,9 +303,15 @@ export function finishRequest(id: string, outcome: RequestOutcome, now = new Dat
 // Status
 // ---------------------------------------------------------------------------
 
+/** Called on every event poll of the editor, so tools know whether a tab is open. */
+export async function touchEditor(now = Date.now()): Promise<void> {
+  await writeJsonAtomic(path.join(bridgeRoot(), "editor.json"), { lastSeen: now });
+}
+
 export async function bridgeStatus(now = Date.now()): Promise<BridgeStatus> {
-  const [listener, synced, ids] = await Promise.all([
+  const [listener, editor, synced, ids] = await Promise.all([
     readJson<{ lastSeen: number; client?: BridgeClient }>(path.join(bridgeRoot(), "listener.json")),
+    readJson<{ lastSeen: number }>(path.join(bridgeRoot(), "editor.json")),
     readSyncedProject(),
     listIds(requestsDir()),
   ]);
@@ -301,6 +330,7 @@ export async function bridgeStatus(now = Date.now()): Promise<BridgeStatus> {
     listener: listening ? "listening" : claimed ? "busy" : "offline",
     lastSeen,
     listenerClient: listener ? (listener.client ?? "cli") : null,
+    editorOpen: editor !== null && now - editor.lastSeen < EDITOR_TTL_MS,
     pending,
     project: synced ? { id: synced.project.id, name: synced.project.name, syncedAt: synced.syncedAt } : null,
   };
@@ -329,6 +359,12 @@ export async function pushEvent(event: NewBridgeEvent, now = new Date()): Promis
  * Events after `cursor`. Without a cursor nothing is returned, only the
  * current cursor, so an editor that just opened does not replay old scenes.
  */
+/** One stored event (the editor opened with ?event=<id> applies it on load). */
+export function readEvent(id: string): Promise<BridgeEvent | null> {
+  if (!isValidBridgeId(id)) return Promise.resolve(null);
+  return readJson<BridgeEvent>(path.join(eventsDir(), `${id}.json`));
+}
+
 export async function eventsAfter(cursor: string | null): Promise<{ events: BridgeEvent[]; cursor: string }> {
   const ids = await listIds(eventsDir());
   const latest = ids.at(-1) ?? "";

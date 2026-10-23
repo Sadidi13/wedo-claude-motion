@@ -1,0 +1,52 @@
+name: Bug report
+description: Something in WeDo Claude Motion does not work as described
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Security problems: please do NOT open an issue, follow SECURITY.md instead.
+        Never paste API keys, bridge tokens or private project files here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the editor
+        2. …
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Editor (layers, timeline, canvas)
+        - Import
+        - Export
+        - Ask Claude tab
+        - Claude chat connector (MCP)
+        - Claude Code session (motion-bridge)
+        - Autopilot
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "Windows 11, Node 22.x, pnpm 10.x, Chrome 1xx, commit abc1234"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Browser console, terminal output or .motion-bridge/dev-server.log (remove anything private first).

@@ -1,4 +1,4 @@
-# Claude Desktop bridge
+# WeDo Claude Motion and Claude: the Claude Desktop bridge
 
 Connects Claude to the running editor, so Claude can work on scenes with a Claude subscription
 instead of an API key. Two kinds of Claude session can use it:
@@ -67,13 +67,14 @@ bridge like `wait` does, which talks only to the local server and costs no Claud
 arrives it runs Claude Code once in print mode with the user's own Claude login:
 
 ```bash
-claude -p --output-format json --system-prompt-file <authoring guide> --tools "" --strict-mcp-config --no-session-persistence
+claude -p --output-format json --system-prompt-file <authoring guide> --tools "" --strict-mcp-config --setting-sources "" --no-session-persistence
 ```
 
 The brief (`?client=headless`) asks for a bare JSON object; the reply goes through the same validation,
 with one retry carrying the error, and is declined with the reason if it still fails. Claude Code runs
-with no tools, no MCP servers and no `CLAUDE*` environment variables, in an empty working folder, so a
-request can only ever produce scene code. Each request is a short, independent run: no conversation
+with no tools, no MCP servers, no settings or hooks (`--setting-sources ""`) and no `CLAUDE*`
+environment variables, in a private temporary folder deleted on exit, so a request can only ever
+produce scene code. Each request is a short, independent run: no conversation
 grows over time.
 
 - **Windows:** double-click `scripts/start-autopilot.cmd`. It starts Motion Studio in its own window if
@@ -145,13 +146,32 @@ below, so no skill is needed in the chat.
 | `POST /api/bridge/events` | CLI, token | push `{ type: "project", name, … }` or `{ type: "edit", layerId?, … }` |
 | `GET /api/bridge/contract` | CLI | the authoring contract (the API system prompt) |
 
+## Opening the editor and the next-step note
+
+`create_scene` / `edit_scene` (chat) and `new` / `edit` (CLI) start `pnpm dev` when the server does
+not answer. After pushing, they check `editorOpen` in the status: the editor's event polls double as
+its heartbeat (seen within 75 s, because browsers throttle background tabs). With no editor open
+they open `http://localhost:3000/?event=<id>` in the default browser; the fresh tab fetches that
+event from `GET /api/bridge/events/[id]`, applies it and removes the parameter from the address.
+
+Both then hand Claude a next-step note to end its reply with, in the user's language: change things
+in the Ask Claude tab and then write "check Claude Motion" («کلاد موشن رو چک کن») in the chat, or keep
+the autopilot open. "Check Claude Motion" makes Claude handle the queued requests once.
+
 ## Security
 
-- The dev server listens on the local network too. Routes that read the project or act for Claude
-  require the `x-motion-bridge-token` header. The token is a random secret in the bridge state folder,
-  inside the repository on this machine. The CLI and the connector read it for you.
-- Text typed into the Ask Claude tab reaches Claude as data. The skill limits what it may lead to:
-  writing scene code and answering through `respond` or `fail`, nothing else.
+See `SECURITY.md` for the threat model. For the bridge in particular:
+
+- The server listens on 127.0.0.1, and `src/proxy.ts` refuses foreign host names, cross-site `/api`
+  requests and non-JSON writes. Routes that read the project or act for Claude also require the
+  `x-motion-bridge-token` header: a random secret in the bridge state folder, created with
+  owner-only permissions where the OS supports them. The CLI and the connector read it for you, and
+  refuse to send it to a non-local http address.
+- Project file paths are validated on the server and again where the CLI writes them.
+- Text typed into the Ask Claude tab reaches Claude as data: the brief says so before any of it. The
+  skill limits what it may lead to (scene code through `respond` or `fail`), and the autopilot has no
+  tools at all.
+- At most 20 requests wait in the queue; requests and events older than a day are deleted.
 
 ## CLI
 

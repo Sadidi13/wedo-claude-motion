@@ -7,6 +7,8 @@
  * Environment: MOTION_STUDIO_URL (default http://localhost:3000),
  * MOTION_STUDIO_BRIDGE_DIR (default <repo>/.motion-bridge/state, same as the server).
  */
+import { spawn } from "node:child_process";
+import { mkdirSync, openSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +18,16 @@ export const SCRATCH = path.join(REPO, ".motion-bridge");
 export const BASE = (process.env.MOTION_STUDIO_URL || "http://localhost:3000").replace(/\/+$/, "");
 export const BRIDGE_DIR = process.env.MOTION_STUDIO_BRIDGE_DIR || path.join(SCRATCH, "state");
 const TOKEN_HEADER = "x-motion-bridge-token";
+
+/** The token must never travel in clear text to another machine. */
+function assertSafeBase(base) {
+  const url = new URL(base);
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) || url.hostname.endsWith(".localhost");
+  if (!loopback && url.protocol !== "https:" && process.env.MOTION_STUDIO_ALLOW_REMOTE !== "1") {
+    throw new Error(`MOTION_STUDIO_URL ${base} is not on this machine and not https; refusing to send the bridge token there`);
+  }
+}
+assertSafeBase(BASE);
 
 /** Something the user or Claude can act on: server down, no token, bad id, … */
 export class BridgeError extends Error {
@@ -154,3 +166,82 @@ export const sleep = (ms, signal) =>
       resolve();
     });
   });
+
+// ---------------------------------------------------------------------------
+// Server and browser
+// ---------------------------------------------------------------------------
+
+const EVENT_ID = /^[0-9a-z]{15}$/;
+
+/** Status, or null when the server is not reachable. */
+export async function tryStatus() {
+  try {
+    return await getStatus();
+  } catch (error) {
+    if (error instanceof BridgeError && error.status === 0) return null;
+    throw error;
+  }
+}
+
+/**
+ * Make sure the editor's server runs: when it does not answer, start `pnpm dev` in the
+ * repository as its own detached process (log: .motion-bridge/dev-server.log) and wait for it.
+ */
+export async function ensureServer({ timeoutSeconds = 90 } = {}) {
+  let status = await tryStatus();
+  if (status) return { status, started: false };
+  mkdirSync(SCRATCH, { recursive: true });
+  const log = openSync(path.join(SCRATCH, "dev-server.log"), "a");
+  const [command, args] = process.platform === "win32" ? ["cmd.exe", ["/d", "/s", "/c", "pnpm dev"]] : ["pnpm", ["dev"]];
+  spawn(command, args, { cwd: REPO, detached: true, stdio: ["ignore", log, log], windowsHide: true }).unref();
+  const deadline = Date.now() + timeoutSeconds * 1000;
+  while (Date.now() < deadline) {
+    await sleep(1500);
+    status = await tryStatus();
+    if (status) return { status, started: true };
+  }
+  throw new BridgeError(
+    `Started "pnpm dev" in ${REPO}, but it did not answer within ${timeoutSeconds} s. See ${path.join(SCRATCH, "dev-server.log")}.`,
+  );
+}
+
+/** The editor's URL; with an event id the freshly opened tab applies that scene or edit. */
+export function editorUrl(eventId) {
+  return eventId && EVENT_ID.test(eventId) ? `${BASE}/?event=${eventId}` : `${BASE}/`;
+}
+
+/** Open a URL built by editorUrl() in the default browser (never a URL taken from user text). */
+export function openInBrowser(url) {
+  if (!url.startsWith(`${BASE}/`)) throw new BridgeError(`Refusing to open ${url}`);
+  const [command, args] =
+    process.platform === "win32"
+      ? ["cmd.exe", ["/d", "/c", "start", "", url]]
+      : process.platform === "darwin"
+        ? ["open", [url]]
+        : ["xdg-open", [url]];
+  spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true }).unref();
+}
+
+/**
+ * After a scene or edit was pushed: open the editor in the browser unless a tab is already
+ * open (that tab picks the change up by itself). Returns true when a browser tab was opened.
+ */
+export async function showInEditor(eventId) {
+  const status = await tryStatus();
+  if (status?.editorOpen) return false;
+  openInBrowser(editorUrl(eventId));
+  return true;
+}
+
+/**
+ * What Claude tells the user at the end of a reply that made or changed a scene, so they know
+ * how to continue from the editor. Persian first (the owner's language), English for others.
+ */
+export const NEXT_STEP_NOTE = {
+  fa:
+    "اگر تغییری می‌خواهی، آن را در WeDo Claude Motion در تب Ask Claude بنویس و بعد اینجا بنویس «کلاد موشن رو چک کن». " +
+    "یا اتوپایلوت را باز بگذار (فایل scripts/start-autopilot.cmd) تا تغییرها خودکار انجام شوند. تغییر را همین‌جا هم می‌توانی از من بخواهی.",
+  en:
+    'To change it, type in the Ask Claude tab of WeDo Claude Motion, then write "check Claude Motion" here. ' +
+    "Or keep the autopilot open (scripts/start-autopilot.cmd) and changes are applied automatically. You can also ask me for the change right here.",
+};

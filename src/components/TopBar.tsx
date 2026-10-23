@@ -7,6 +7,7 @@
 import { Download, Film, FolderOpen, Redo2, Save, TriangleAlert, Undo2, X } from "lucide-react";
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { DISCLAIMER, PRODUCT_NAME } from "@/lib/brand";
 import { exportProjectZip } from "@/lib/importer";
 import { errorMessage, useEditorStore } from "@/store/editorStore";
 import { Button } from "./ui/Button";
@@ -105,9 +106,9 @@ export function TopBar({ onImport, onExport }: TopBarProps) {
 
   return (
     <header className="relative flex h-full items-center gap-2 border-b border-border bg-panel px-3">
-      <div className="flex items-center gap-2 pr-2 text-accent">
+      <div className="flex items-center gap-2 pr-2 text-accent" title={DISCLAIMER}>
         <Film size={16} />
-        <span className="text-[13px] font-semibold tracking-tight text-foreground">Motion Studio</span>
+        <span className="whitespace-nowrap text-[13px] font-semibold tracking-tight text-foreground">{PRODUCT_NAME}</span>
       </div>
       <div className="h-5 w-px bg-border" />
       {project ? <ProjectName name={project.name} onRename={setProjectName} /> : <span className="text-muted">Loading…</span>}

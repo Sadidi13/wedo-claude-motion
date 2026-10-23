@@ -14,13 +14,13 @@
  * cannot clobber each other's read-modify-write.
  */
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { customAlphabet } from "nanoid";
 import type { ExportJobStatus, ExportOptions, Project } from "@/lib/types";
 import { resolvePlan } from "./plan";
-import { parseExportRequest } from "./schema";
+import { EXPORT_LIMITS, ExportRequestError, parseExportRequest } from "./schema";
 
 export const JOB_ID_PATTERN = /^[a-z0-9]{10,24}$/;
 
@@ -63,6 +63,10 @@ async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
 export async function createJob(request: unknown): Promise<{ jobId: string; dir: string }> {
   const { project, options } = parseExportRequest(request);
   const plan = resolvePlan(project, options); // throws early for an empty range
+  if (plan.frameCount > EXPORT_LIMITS.maxFrames) {
+    throw new ExportRequestError(`This export would render ${plan.frameCount} frames; the limit is ${EXPORT_LIMITS.maxFrames}. Shorten the range or lower the fps.`);
+  }
+  await pruneOldJobs();
   const jobId = newJobId();
   const dir = jobDir(jobId);
   await mkdir(dir, { recursive: true });
@@ -80,6 +84,23 @@ export async function createJob(request: unknown): Promise<{ jobId: string; dir:
     writeJsonAtomic(path.join(dir, "status.json"), status),
   ]);
   return { jobId, dir };
+}
+
+/** Finished or abandoned jobs are deleted after this long (frames and outputs can be large). */
+export const JOB_TTL_MS = 24 * 60 * 60_000;
+
+/** Delete job folders older than JOB_TTL_MS. Best effort: a folder in use is skipped. */
+export async function pruneOldJobs(now = Date.now()): Promise<number> {
+  const entries = await readdir(jobsRoot()).catch(() => [] as string[]);
+  let removed = 0;
+  for (const name of entries) {
+    if (!isValidJobId(name)) continue;
+    const dir = path.join(jobsRoot(), name);
+    const info = await stat(dir).catch(() => null);
+    if (!info || now - info.mtimeMs < JOB_TTL_MS) continue;
+    await rm(dir, { recursive: true, force: true }).then(() => removed++, () => undefined);
+  }
+  return removed;
 }
 
 export function readStatus(jobId: string): Promise<ExportJobStatus | null> {

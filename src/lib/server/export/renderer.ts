@@ -44,7 +44,45 @@ const NAVIGATION_TIMEOUT_MS = 90_000;
 const SEEK_TIMEOUT_MS = 15_000;
 const FONT_SETTLE_MS = 300;
 const STATUS_EVERY_FRAMES = 10;
-const LAUNCH_ARGS = ["--no-sandbox", "--disable-dev-shm-usage", "--force-color-profile=srgb"];
+export const CHROMIUM_LAUNCH_ARGS = ["--disable-dev-shm-usage", "--force-color-profile=srgb"];
+
+/**
+ * Whether export runs Chromium with its sandbox. The pages it renders run imported (untrusted)
+ * scene code, so the sandbox stays on (playwright-core adds --no-sandbox unless told
+ * `chromiumSandbox: true`). It is only switched off where Chromium cannot start with it: as root on
+ * Linux (containers), or explicitly with MOTION_STUDIO_CHROMIUM_NO_SANDBOX=1.
+ */
+export function chromiumSandboxEnabled(
+  env: Record<string, string | undefined> = process.env,
+  platform: NodeJS.Platform = process.platform,
+  uid: number | undefined = process.getuid?.(),
+): boolean {
+  return !(env.MOTION_STUDIO_CHROMIUM_NO_SANDBOX === "1" || (platform === "linux" && uid === 0));
+}
+
+/**
+ * Network policy while rendering untrusted scene code: on the app's own origin only the page
+ * itself, the app's bundles (/_next/*) and this job's project may load, so the scene cannot call
+ * /api (start more exports, queue work for Claude, read projects). Other origins (web fonts,
+ * images) stay allowed so exports look like the editor.
+ */
+export function isAllowedRenderRequest(requestUrl: string, pageUrl: string, jobId: string): boolean {
+  let request: URL;
+  let page: URL;
+  try {
+    request = new URL(requestUrl);
+    page = new URL(pageUrl);
+  } catch {
+    return false;
+  }
+  if (request.protocol === "data:" || request.protocol === "blob:") return true;
+  if (request.origin !== page.origin) return true;
+  return (
+    request.pathname === page.pathname ||
+    request.pathname.startsWith("/_next/") ||
+    request.pathname === `/api/export/${jobId}/project`
+  );
+}
 
 /** CHROMIUM_PATH, else the box-level Chromium, else whatever playwright-core resolves itself. */
 /** Well-known Chrome / Chromium / Edge locations, probed when CHROMIUM_PATH is not set. */
@@ -114,6 +152,7 @@ function createProgress(jobId: string, total: number) {
 
 async function renderRange(
   browser: Browser,
+  jobId: string,
   url: string,
   plan: RenderPlan,
   framesDir: string,
@@ -124,6 +163,9 @@ async function renderRange(
     viewport: { width: plan.width, height: plan.height },
     deviceScaleFactor: plan.scale,
   });
+  await context.route("**/*", (route) =>
+    isAllowedRenderRequest(route.request().url(), url, jobId) ? route.continue() : route.abort("blockedbyclient"),
+  );
   try {
     const page = await context.newPage();
     const pageErrors: string[] = [];
@@ -194,9 +236,13 @@ export async function renderJob(jobId: string, origin: string, opts: RenderOptio
   await writeStatus(jobId, { state: "rendering", framesDone: 0, framesTotal: plan.frameCount, progress: 0 });
   const onFrame = createProgress(jobId, plan.frameCount);
 
-  const browser = await chromium.launch({ executablePath: resolveChromiumPath(), args: LAUNCH_ARGS });
+  const browser = await chromium.launch({
+    executablePath: resolveChromiumPath(),
+    args: CHROMIUM_LAUNCH_ARGS,
+    chromiumSandbox: chromiumSandboxEnabled(),
+  });
   try {
-    await Promise.all(ranges.map((range) => renderRange(browser, url, plan, framesDir, range, onFrame)));
+    await Promise.all(ranges.map((range) => renderRange(browser, jobId, url, plan, framesDir, range, onFrame)));
   } finally {
     await browser.close();
   }

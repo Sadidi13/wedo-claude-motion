@@ -6,13 +6,14 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import Home from "@/app/page";
+import { PRODUCT_NAME } from "@/lib/brand";
 import { useEditorStore } from "@/store/editorStore";
 
 describe("editor page SSR", () => {
   it("renders the empty shell on the server", () => {
     expect(useEditorStore.getState().project).toBeNull();
     const html = renderToStaticMarkup(<Home />);
-    expect(html).toContain("Motion Studio");
+    expect(html).toContain(PRODUCT_NAME);
     expect(html).toContain('aria-label="Layers"');
     expect(html).toContain('aria-label="Inspector"');
     expect(html).toContain('aria-label="Timeline tracks"');

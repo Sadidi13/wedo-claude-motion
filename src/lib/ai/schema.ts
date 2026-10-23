@@ -10,6 +10,7 @@
  *   parses itself (streaming path).
  */
 import { z } from "zod";
+import { isUnsafePath } from "@/lib/importer/files";
 
 const PROJECT_FILE_KINDS = ["jsx", "js", "tsx", "ts", "css", "html", "json", "asset"] as const;
 const PROJECT_ORIGINS = ["sample", "claude-design-zip", "html", "jsx", "ai-generate", "blank"] as const;
@@ -19,8 +20,21 @@ const MAX_PROMPT_CHARS = 20_000;
 /** Prior turns kept for iteration; older turns add cost without adding much context. */
 const MAX_HISTORY_TURNS = 40;
 
+/**
+ * Project file paths are written to disk by the Claude tools (motion-bridge `wait` / `project`),
+ * so they must stay inside the project: no absolute or drive-letter paths, no "..", no control
+ * characters. Spaces and non-Latin names are fine (imported assets have them).
+ */
+export const SafeProjectPathSchema = z
+  .string()
+  .min(1)
+  .max(400)
+  .refine((path) => !isUnsafePath(path) && !/[\u0000-\u001f\u007f]/.test(path), {
+    message: "path must be a relative path inside the project (no '..', no leading '/', no drive letter)",
+  });
+
 const ProjectFileSchema = z.object({
-  path: z.string().min(1),
+  path: SafeProjectPathSchema,
   kind: z.enum(PROJECT_FILE_KINDS),
   content: z.string(),
 });

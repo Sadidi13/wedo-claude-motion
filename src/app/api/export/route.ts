@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     const jobId = await startExport(body, request.nextUrl.origin);
     return NextResponse.json({ jobId }, { status: 202 });
   } catch (error) {
-    if (error instanceof ExportRequestError) return NextResponse.json({ error: error.message }, { status: 400 });
+    if (error instanceof ExportRequestError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("[export] could not start job:", error);
     return NextResponse.json({ error: "Could not start the export job" }, { status: 500 });
   }

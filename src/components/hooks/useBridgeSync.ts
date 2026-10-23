@@ -20,6 +20,9 @@ const SYNC_DEBOUNCE_MS = 800;
 const STATUS_EVERY_MS = 2_500;
 const EVENTS_EVERY_MS = 1_500;
 const REQUEST_EVERY_MS = 1_000;
+const EVENT_ID = /^[0-9a-z]{15}$/;
+/** Events applied from the URL; module-level so React's double-run of effects in development cannot apply one twice. */
+const appliedFromUrl = new Set<string>();
 
 async function getJson<T>(url: string): Promise<{ status: number; body: T | null }> {
   const response = await fetch(url, { cache: "no-store" });
@@ -126,6 +129,22 @@ export function useBridgeSync(): void {
     };
     void pollEvents();
     const eventsTimer = setInterval(() => void pollEvents(), EVENTS_EVERY_MS);
+
+    // 3b. Opened by Claude with ?event=<id> (no editor tab was open): apply that scene / edit once.
+    const opened = new URLSearchParams(window.location.search).get("event");
+    if (opened && EVENT_ID.test(opened) && !appliedFromUrl.has(opened)) {
+      void getJson<BridgeEvent>(`/api/bridge/events/${opened}`)
+        .then(({ status, body }) => {
+          if (disposed || appliedFromUrl.has(opened)) return;
+          appliedFromUrl.add(opened);
+          const url = new URL(window.location.href);
+          url.searchParams.delete("event");
+          window.history.replaceState(null, "", url.toString());
+          if (status === 200 && body) applyEvent(body);
+          else useEditorStore.getState().setNotice({ kind: "warning", message: "The scene Claude made is no longer available" });
+        })
+        .catch(() => undefined);
+    }
 
     // 4. The queued Ask Claude request.
     let requestBusy = false;

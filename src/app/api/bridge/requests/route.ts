@@ -5,12 +5,17 @@
  */
 import { z } from "zod";
 import { AiEditRequestSchema } from "@/lib/ai";
-import { createRequest, readJsonBody } from "@/lib/server/bridge";
+import { BridgeStateError, createRequest, readJsonBody } from "@/lib/server/bridge";
 
 export async function POST(request: Request): Promise<Response> {
   const body = await readJsonBody(request);
   const parsed = AiEditRequestSchema.safeParse(body);
   if (!parsed.success) return Response.json({ error: `Invalid request: ${z.prettifyError(parsed.error)}` }, { status: 400 });
-  const record = await createRequest(parsed.data);
-  return Response.json({ id: record.id }, { status: 202 });
+  try {
+    const record = await createRequest(parsed.data);
+    return Response.json({ id: record.id }, { status: 202 });
+  } catch (error) {
+    if (error instanceof BridgeStateError) return Response.json({ error: error.message }, { status: error.status });
+    throw error;
+  }
 }
