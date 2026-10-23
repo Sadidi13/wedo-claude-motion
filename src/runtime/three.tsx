@@ -33,6 +33,7 @@
 import React, { useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes } from "react";
 import { flushSync } from "react-dom";
 import * as THREE from "three";
+import { fontsLoaded } from "./fonts";
 import { useSprite, useStage, useTime } from "./motion";
 import { holdFrame } from "./pending";
 
@@ -110,11 +111,6 @@ function disposeScene(scene: THREE.Scene): void {
   });
   if (scene.background instanceof THREE.Texture) scene.background.dispose();
   scene.environment?.dispose();
-}
-
-/** True when no web font is still loading (always true on the server, where effects never run). */
-function fontsLoaded(): boolean {
-  return typeof document === "undefined" || !document.fonts || document.fonts.status === "loaded";
 }
 
 function loadTexture(name: string, url: string): Promise<THREE.Texture> {

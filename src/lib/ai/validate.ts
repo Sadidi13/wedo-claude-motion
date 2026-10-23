@@ -14,17 +14,19 @@
  * Every failure is returned as a plain-English error string that is fed back
  * to the model for the single retry.
  */
+import { GSAP_MODULES, gsapModuleFor } from "@/lib/gsapModules";
 import { ParseError, ensureLayerIds, getLayerSource, parseScene, replaceLayerSource } from "@/lib/parser";
 import type { AiScope } from "@/lib/types";
 import type { AiOutput, AiOutputFile } from "./schema";
 
-/** Bare module specifiers a project file may import (CONTRACTS §1). */
+/** Bare module specifiers a project file may import (CONTRACTS §1); `gsap/<Plugin>.js` spellings are allowed too. */
 export const ALLOWED_BARE_IMPORTS: ReadonlySet<string> = new Set([
   "react",
   "react-dom",
   "react-dom/client",
   "lucide-react",
   "three",
+  ...GSAP_MODULES,
   "@motion/runtime",
   "motion-runtime",
 ]);
@@ -38,7 +40,12 @@ const CALL_IMPORT_RE = /\b(?:require|import)\s*\(\s*["']([^"']+)["']\s*\)/g;
 
 /** APIs that make the picture depend on something other than the seeked time (incl. three.js render loops). */
 const FORBIDDEN_CALL_RE =
-  /\b(Math\.random|Date\.now|performance\.now|setTimeout|setInterval|requestAnimationFrame|setAnimationLoop)\s*\(/g;
+  /\b(Math\.random|Date\.now|performance\.now|setTimeout|setInterval|requestAnimationFrame|setAnimationLoop|utils\.random)\s*\(/g;
+/**
+ * GSAP's random values (`x: "random(-50, 50)"`, `stagger: { from: "random" }`) are drawn once per
+ * build with Math.random, so every export worker would draw different ones.
+ */
+const GSAP_RANDOM_RE = /(["'`])random\(|\bfrom\s*:\s*["'`]random["'`]/g;
 
 /** `styles.css`, `components/Card.jsx` — no leading slash, no `..`, no backslashes, no empty segments. */
 const SAFE_RELATIVE_PATH_RE = /^(?!\.\.?(?:\/|$))[\w.\-]+(?:\/(?!\.\.?(?:\/|$))[\w.\-]+)*$/;
@@ -46,7 +53,12 @@ const SAFE_RELATIVE_PATH_RE = /^(?!\.\.?(?:\/|$))[\w.\-]+(?:\/(?!\.\.?(?:\/|$))[
 const SOURCE_FILE_RE = /\.(?:jsx?|tsx?)$/;
 
 export function isAllowedImport(specifier: string): boolean {
-  return ALLOWED_BARE_IMPORTS.has(specifier) || specifier.startsWith("./") || specifier.startsWith("../");
+  return (
+    ALLOWED_BARE_IMPORTS.has(specifier) ||
+    gsapModuleFor(specifier) !== undefined ||
+    specifier.startsWith("./") ||
+    specifier.startsWith("../")
+  );
 }
 
 /** Every import specifier (static, re-export, require, dynamic import) that is not allowed, deduplicated. */
@@ -61,10 +73,15 @@ export function findDisallowedImports(source: string): string[] {
   return [...found];
 }
 
-/** Calls of `Math.random`, `Date.now`, `performance.now`, timers, `requestAnimationFrame`, `setAnimationLoop`, deduplicated. */
+/**
+ * Calls of `Math.random`, `Date.now`, `performance.now`, timers, `requestAnimationFrame`,
+ * `setAnimationLoop`, `gsap.utils.random`, plus GSAP random values ("random(…)" strings,
+ * `from: "random"` staggers), deduplicated.
+ */
 export function findForbiddenCalls(source: string): string[] {
   const found = new Set<string>();
   for (const match of source.matchAll(FORBIDDEN_CALL_RE)) found.add(match[1]);
+  for (const match of source.matchAll(GSAP_RANDOM_RE)) found.add(match[1] ? '"random(…)"' : 'from: "random"');
   return [...found];
 }
 

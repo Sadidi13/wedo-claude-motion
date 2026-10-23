@@ -129,6 +129,6 @@ irm https://raw.githubusercontent.com/Sadidi13/wedo-claude-motion/main/scripts/i
 
 ## مجوز
 
-MIT. فایل [LICENSE](LICENSE) را ببین.
+MIT. فایل [LICENSE](LICENSE) را ببین. صحنه‌ها می‌توانند از [GSAP](https://gsap.com) استفاده کنند که به‌عنوان وابستگی نصب می‌شود و لایسنس خودش را دارد («Standard No Charge» از GreenSock / Webflow)، نه MIT. three.js لایسنس MIT دارد.
 
 </div>

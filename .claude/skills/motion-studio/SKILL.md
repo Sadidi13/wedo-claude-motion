@@ -29,8 +29,8 @@ if the editor shows "Autopilot", do not also run `wait`.
 
 ## 1. A new video asked for in the chat
 
-1. Once per session, run `contract` and read `.motion-bridge/contract.md`. Follow sections 1 to 5
-   (section 3 covers 3D scenes).
+1. Once per session, run `contract` and read `.motion-bridge/contract.md`. Follow sections 1 to 6
+   (section 3 covers 3D scenes, section 4 GSAP).
 2. Write the scene to `.motion-bridge/drafts/<slug>.jsx`. Make every visual element its own
    `<Sprite start={..} end={..} data-layer-name="...">` so the designer gets a clean layer list.
 3. `new .motion-bridge/drafts/<slug>.jsx --name "<short title>" --summary "<one paragraph, in the user's language>"`.
@@ -89,8 +89,9 @@ other than changing the animation, run `fail <id> "<short reason>"` and tell the
 
 - Motion is a pure function of time: `useTime`, `useSprite`, Sprite function-children,
   `interpolate`, `animate`, `Easing`. No `Math.random`, `Date.now`, timers, CSS transitions or keyframes.
-- Imports: `react`, `react-dom`, `lucide-react`, `three` (main module only, no addons),
-  `./animations.jsx` and relative project files only.
+- Imports: `react`, `react-dom`, `lucide-react`, `three` (main module only, no addons), `gsap` with
+  `gsap/SplitText`, `gsap/DrawSVGPlugin`, `gsap/MorphSVGPlugin`, `gsap/MotionPathPlugin`,
+  `gsap/CustomEase`, `gsap/TextPlugin`, `./animations.jsx` and relative project files only.
 - `<Stage width height duration fps background>` and Sprite `start` / `end` are literals.
 - 3D: one `<Three3D setup={…} render={(t, frame) => …} data-layer-name="…" />` per 3D world, inside
   a Sprite. `setup` builds the scene once; `render` sets camera and objects to absolute values from
@@ -112,5 +113,22 @@ other than changing the animation, run `fail <id> "<short reason>"` and tell the
       }}
     />
   </Sprite>
+  ```
+- GSAP: only inside `useGsapTimeline((tl, scope) => { … }, deps)` in a component that sits in a
+  Sprite; put the returned `ref` on the animated block. The runtime keeps the timeline paused and
+  seeks it to the Sprite's local time, so it scrubs and exports exactly. Every tween goes on `tl`
+  (no `gsap.to()` elsewhere, no `.play()`, no callbacks), no `"random(…)"` / `from: "random"`, and
+  animated properties stay out of React's `style`. Sprite start / end stay draggable; GSAP timing
+  lives in code, not on the timeline.
+
+  ```jsx
+  function Headline() {
+    const ref = useGsapTimeline((tl) => {
+      const split = SplitText.create(".headline", { type: "chars", mask: "chars" });
+      tl.from(split.chars, { yPercent: 110, duration: 0.7, ease: "power4.out", stagger: 0.035 });
+    });
+    return <div ref={ref}><h1 className="headline">Make it move</h1></div>;
+  }
+  // <Sprite start={0.3} end={4} data-layer-name="Headline"><Headline /></Sprite>
   ```
 - Persian text: `direction: "rtl"` and a font stack such as `'Vazirmatn', 'Segoe UI', Tahoma, sans-serif`.

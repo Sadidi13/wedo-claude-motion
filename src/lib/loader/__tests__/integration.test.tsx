@@ -10,8 +10,11 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
+import type { GsapModule } from "@/lib/gsapModules";
 import type { ProjectFile } from "@/lib/types";
 import * as runtime from "@/runtime";
+import { resetClock, setClock } from "@/runtime/clock";
+import { GSAP_NAMESPACES } from "@/runtime/gsap";
 import { createModuleSystem } from "../modules";
 import { buildFileTable } from "../resolve";
 import { asEsModule, createReactDomShim } from "../shims";
@@ -88,10 +91,39 @@ function realSystem(projectFiles: Record<string, ProjectFile>, injectCss = vi.fn
       "react-dom": createReactDomShim(() => {}),
       "lucide-react": asEsModule({}),
       three: asEsModule(THREE),
+      ...(Object.fromEntries(
+        Object.entries(GSAP_NAMESPACES).map(([name, ns]) => [name, asEsModule(ns, (ns as { default?: unknown }).default)]),
+      ) as Record<GsapModule, unknown>),
       runtime: asEsModule(runtime),
     },
   });
 }
+
+const SCENE_GSAP = `
+import React from "react";
+import gsap from "gsap";
+import { SplitText } from "gsap/SplitText";
+import { Stage, Sprite, useGsapTimeline } from "./animations.jsx";
+
+function Headline() {
+  const ref = useGsapTimeline((tl) => {
+    const split = SplitText.create("h1", { type: "chars" });
+    tl.from(split.chars, { yPercent: 100, stagger: 0.05, duration: 0.6 });
+  });
+  return <div ref={ref}><h1>Move it</h1></div>;
+}
+
+export const engine = gsap.version;
+export default function Scene() {
+  return (
+    <Stage width={1080} height={1920} duration={4} fps={30}>
+      <Sprite start={0.5} end={4} data-layer-id="headline" data-layer-name="Headline">
+        <Headline />
+      </Sprite>
+    </Stage>
+  );
+}
+`;
 
 describe("module system + real runtime", () => {
   it("evaluates a contract-style scene and renders the expected stage markup", () => {
@@ -120,5 +152,17 @@ describe("module system + real runtime", () => {
     expect(html).toMatch(/<div data-three3d="" data-layer-id="three" data-layer-name="Boxes" style="[^"]*width:1080px;height:1920px/);
     // the canvas and renderer are created in a layout effect, which never runs on the server
     expect(html).not.toContain("<canvas");
+  });
+
+  it("loads a GSAP scene with the real gsap, its plugins and the runtime's useGsapTimeline", () => {
+    const system = realSystem(buildFileTable({ "scene.jsx": { path: "scene.jsx", kind: "jsx", content: SCENE_GSAP } }));
+    const exports = system.load("scene.jsx") as { default: React.ComponentType; engine: string };
+    expect(exports.engine).toBe("3.15.0");
+    setClock({ time: 1 }); // inside the headline Sprite's window (0.5–4 s)
+    const html = renderToStaticMarkup(React.createElement(exports.default));
+    resetClock();
+    // timelines are built in layout effects, which never run on the server: plain markup
+    expect(html).toContain('data-layer-id="headline"');
+    expect(html).toContain("<h1>Move it</h1>");
   });
 });

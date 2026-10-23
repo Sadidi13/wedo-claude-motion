@@ -22,6 +22,13 @@ First public release, under the MIT license.
   `<Three3D setup render>`, one layer, still a pure function of time. Export waits for its textures,
   renders WebGL on the GPU (SwiftShader fallback, or `MOTION_STUDIO_WEBGL=swiftshader`), and the
   `3D dolly` sample shows a camera move through lit boxes under a 2D title.
+- GSAP: scenes may import `gsap` (pinned 3.15.0) and SplitText, DrawSVG, MorphSVG, MotionPath,
+  CustomEase and TextPlugin. The runtime's `useGsapTimeline` builds a paused timeline and seeks it to
+  the Sprite's local time, so GSAP scrubs and exports frame-exactly; GSAP's own clock is stopped.
+  `Kinetic type (GSAP)` sample. GSAP is under GreenSock / Webflow's "Standard No Charge" license,
+  not MIT.
+- Export: status writes retry when Windows briefly locks `status.json` during a status poll (an
+  export could fail with `EPERM`).
 
 ### Working with Claude, no API key needed
 - **Claude Code sessions** create and edit scenes with `scripts/motion-bridge.mjs` and the

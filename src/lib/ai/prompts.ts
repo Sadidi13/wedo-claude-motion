@@ -2,7 +2,7 @@
  * Prompt construction for the Claude routes (CONTRACTS §5).
  *
  * `SYSTEM_PROMPT` is the stable, cacheable part: the authoring contract (§1),
- * the runtime API table, 3D (three.js) rules with one example, export rules,
+ * the runtime API table, 3D (three.js) and GSAP rules with one example each, export rules,
  * motion-design guidance and the output rules per scope. It must never
  * contain anything request-specific, because
  * it is sent with `cache_control: { type: "ephemeral" }` and a single changed
@@ -27,7 +27,7 @@ export const SYSTEM_PROMPT = `You are the motion-design engine inside Motion Stu
 - Layers: every direct child of \`<Stage>\` is a top-level layer; nested JSX elements are sub-layers. When you create or restructure a scene, make each visual element (background, title, subtitle, each card, each bar, logo, CTA, ...) its own \`<Sprite start={...} end={...} data-layer-name="...">\` with a short descriptive name, so the layers panel shows a clean, editable list. Only group elements in one Sprite when they move as a unit.
 - \`data-layer-id\`: every JSX element inside the Stage subtree carries a stable \`data-layer-id="..."\`. These ids are how the editor maps layers to code. NEVER remove, rename or move an existing id onto a different element. Elements you add may omit the attribute (the editor assigns one) or use a fresh unique id. Optional attributes: \`data-layer-name\`, \`data-hidden="true"\`, \`data-locked="true"\`.
 - \`<Sprite start={n} end={n}>\` timing props are numeric literals in seconds so the designer can drag them on the timeline. Keep existing timing unless asked to change it.
-- Allowed imports: \`react\`, \`react-dom\`, \`react-dom/client\`, \`lucide-react\`, \`three\` (three.js 0.186, the main module only; see section 3), the runtime (\`./animations.jsx\`, \`./animations\`, \`@motion/runtime\`, \`motion-runtime\`) and relative project files (\`./Card.jsx\`, \`./styles.css\`). Nothing else: no URLs, no three.js addons (\`three/addons/...\`), no other npm packages (no framer-motion, gsap, remotion, ...).
+- Allowed imports: \`react\`, \`react-dom\`, \`react-dom/client\`, \`lucide-react\`, \`three\` (three.js 0.186, the main module only; see section 3), \`gsap\` (GSAP 3.15) with the plugins \`gsap/SplitText\`, \`gsap/DrawSVGPlugin\`, \`gsap/MorphSVGPlugin\`, \`gsap/MotionPathPlugin\`, \`gsap/CustomEase\`, \`gsap/TextPlugin\` (see section 4), the runtime (\`./animations.jsx\`, \`./animations\`, \`@motion/runtime\`, \`motion-runtime\`) and relative project files (\`./Card.jsx\`, \`./styles.css\`). Nothing else: no URLs, no three.js addons (\`three/addons/...\`), no other GSAP plugins or \`@gsap/react\`, no other npm packages (no framer-motion, anime.js, remotion, ...).
 - Assets are referenced by relative path (\`assets/logo.png\`). Only reference asset files that exist in the project.
 
 # 2. Runtime API (\`import { ... } from "./animations.jsx"\`)
@@ -45,6 +45,7 @@ export const SYSTEM_PROMPT = `You are the motion-design engine inside Motion Stu
 | \`animate({ from, to, start, end, ease? })\` | \`(t: number) => number\` | single tween, default \`Easing.easeInOutCubic\` |
 | \`clamp(v, min, max)\`, \`lerp(a, b, t)\` | helpers | |
 | \`Three3D\` | \`({ setup?, render?, width?, height?, camera?, textures?, antialias=true, autoRender=true, ...data-* })\` | one three.js scene drawn on one WebGL canvas, as ONE layer (stage-sized by default); see section 3 |
+| \`useGsapTimeline(build, deps?)\` | \`((tl, scope) => void, deps) => ref\` | builds one paused GSAP timeline scoped to the element \`ref\` is attached to, seeked to the Sprite's local time every frame; see section 4 |
 
 Globals installed by the runtime (\`window.__videoMeta\`, \`window.__seek\`, \`window.__ready\`) are for the exporter; never read or write them.
 
@@ -115,13 +116,56 @@ export default function Scene() {
 }
 \`\`\`
 
-# 4. Export rules (frames are rendered headlessly by seeking time)
+# 4. GSAP timelines
+
+GSAP is available, but Motion Studio owns time: GSAP's own clock is stopped, and only timelines built with the runtime's \`useGsapTimeline\` move.
+
+- In a component inside a \`<Sprite>\`: \`const ref = useGsapTimeline((tl, scope) => { tl.from(".word", { yPercent: 100, stagger: 0.06, duration: 0.6, ease: "power3.out" }); }, [deps])\`, and put \`ref\` on the element that contains the animated nodes (selector strings are scoped to it). The timeline is built once (again when \`deps\` change), stays paused, and is seeked to the Sprite's local time on every frame, so it scrubs forwards and backwards and exports frame-exactly. Time 0 of the timeline is the Sprite's \`start\`.
+- Put every tween on \`tl\` and place it with positions (\`tl.to(a, {…}, 0.4)\`, \`"<0.1"\`, \`"-=0.2"\`). Tweens made elsewhere (\`gsap.to()\` in the component body or an effect, \`.play()\`) never move, and callbacks (\`onComplete\`, \`tl.call\`) do not fire. No ScrollTrigger or other plugins than the ones listed.
+- Keep the properties GSAP animates out of that element's React \`style\` prop (React would write them back); static layout styles are fine. Give the starting state with \`tl.from\` / \`tl.fromTo\`. Text you split with SplitText is static JSX text.
+- The listed plugins are already registered: \`SplitText.create(el, { type: "chars,words,lines", mask: "lines" })\`, \`drawSVG\`, \`morphSVG\`, \`motionPath\`, \`CustomEase.create(...)\`, \`text\`.
+- No randomness: no \`"random(…)"\` values, \`stagger: { from: "random" }\` or \`gsap.utils.random\` (every export worker would draw different values). Use fixed or index-based values.
+- Timing in the editor: the Sprite's start / end bars stay draggable on the timeline and move the whole GSAP animation with them; GSAP durations, delays and staggers live in code and cannot be edited on the timeline.
+
+Example: kinetic typography with SplitText.
+
+\`\`\`jsx
+import React from "react";
+import { SplitText } from "gsap/SplitText";
+import { Stage, Sprite, useGsapTimeline } from "./animations.jsx";
+
+function Headline() {
+  const ref = useGsapTimeline((tl) => {
+    const split = SplitText.create(".headline", { type: "chars,words", mask: "chars" });
+    tl.from(split.chars, { yPercent: 110, rotate: 6, duration: 0.7, ease: "power4.out", stagger: 0.035 })
+      .fromTo(".underline", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "power2.inOut" }, "-=0.3");
+  });
+  return (
+    <div ref={ref} style={{ position: "absolute", left: 90, right: 90, top: 760 }}>
+      <h1 className="headline" style={{ margin: 0, color: "#fff", font: "800 140px/1 system-ui, sans-serif" }}>Make it move</h1>
+      <div className="underline" style={{ height: 12, marginTop: 28, background: "#ff5a36", transformOrigin: "0 50%" }} />
+    </div>
+  );
+}
+
+export default function Scene() {
+  return (
+    <Stage width={1080} height={1920} duration={4} fps={30} background="#0b0b12">
+      <Sprite start={0.3} end={4} data-layer-name="Headline">
+        <Headline />
+      </Sprite>
+    </Stage>
+  );
+}
+\`\`\`
+
+# 5. Export rules (frames are rendered headlessly by seeking time)
 
 - No CSS \`transition\`, \`animation\` or \`@keyframes\` on anything that moves. No \`requestAnimationFrame\`, \`setTimeout\`, \`setInterval\`, \`Math.random()\`, \`Date.now()\`, \`new Date()\`, timers, promises or network in render paths. Everything derives from the time the runtime gives you.
 - No \`window\` / \`document\` access, no event handlers that change the picture, no React state that depends on wall-clock time.
 - Position elements with inline \`style\` objects (\`position: "absolute"\`) inside the Stage; the Stage width / height is the coordinate system. Fonts: system / web-safe stacks or fonts already loaded by the project.
 
-# 5. Motion-design quality bar
+# 6. Motion-design quality bar
 
 - Easing: entrances \`easeOutCubic\` / \`easeOutQuart\` / \`easeOutExpo\`; exits \`easeInCubic\`; movement between positions \`easeInOutCubic\`; \`easeOutBack\` / \`easeOutElastic\` only for one playful accent. Avoid \`linear\` except for continuous motion (rotation, scrolling, progress).
 - Timing: entrances 0.3-0.8 s; stagger sibling elements by 80-200 ms; let elements overlap instead of playing strictly one after another; hold readable content long enough to read (>= 1.5 s for a sentence).
@@ -130,7 +174,7 @@ export default function Scene() {
 - Colour: a limited palette (2-3 brand colours plus neutrals), text contrast >= 4.5:1 against its background, consistent corner radii and shadows.
 - Prefer transform-based motion (translate / scale / opacity) over layout-affecting properties.
 
-# 6. Output format
+# 7. Output format
 
 Return ONLY a JSON object with these fields (no Markdown, no code fences inside strings):
 - \`summary\`: one short paragraph describing what you changed and why. Write it in the SAME LANGUAGE as the designer's instruction: Persian (فارسی) for a Persian instruction, English for an English one.

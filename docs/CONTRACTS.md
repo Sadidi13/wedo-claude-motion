@@ -68,9 +68,11 @@ Rules (the AI system prompt and the importer both enforce / assume these):
   to retime them from the timeline. Expressions are allowed but shown as read-only.
 * Allowed imports inside a project: `react`, `react-dom`, `react-dom/client`, `lucide-react`,
   `three` (three.js, pinned to an exact version in `package.json`; the main module only, no
-  `three/addons/…`), the runtime (`./animations.jsx`, `./animations`, `@motion/runtime`,
-  `motion-runtime`), and relative project files (`./Card.jsx`, `./styles.css`). Anything else fails
-  to load with a clear error.
+  `three/addons/…`), `gsap` (pinned) plus `gsap/SplitText`, `gsap/DrawSVGPlugin`,
+  `gsap/MorphSVGPlugin`, `gsap/MotionPathPlugin`, `gsap/CustomEase`, `gsap/TextPlugin`
+  (`src/lib/gsapModules.ts`; `.js` spellings accepted), the runtime (`./animations.jsx`,
+  `./animations`, `@motion/runtime`, `motion-runtime`), and relative project files (`./Card.jsx`,
+  `./styles.css`). Anything else fails to load with a clear error.
 * Assets are referenced by relative path (`assets/logo.png`); the loader rewrites them to data URLs.
 
 ### Runtime API (`src/runtime/motion.tsx`) — exports
@@ -88,13 +90,14 @@ Rules (the AI system prompt and the importer both enforce / assume these):
 | `animate({ from, to, start, end, ease? })` | `(t:number)=>number` | single tween, default `Easing.easeInOutCubic` |
 | `clamp(v, min, max)`, `lerp(a, b, t)` | helpers | |
 | `Three3D` | `({ setup?, render?, width?, height?, camera?, textures?, antialias=true, autoRender=true, style, ...data-* })` | one three.js scene on one WebGL canvas = **one layer** (`src/runtime/three.tsx`). Renders `<div data-three3d style="position:absolute;left:0;top:0;width;height">` (default size: the Stage) carrying the `data-*` props, with the canvas inside. See "3D scenes" below. |
+| `useGsapTimeline` | `(build: (tl, scope) => void, deps = []) => RefObject` | one paused GSAP timeline scoped to the element the returned ref is attached to, seeked to the Sprite's local time (stage time outside a Sprite) on every render (`src/runtime/gsap.tsx`). See "GSAP" below. |
 
 Globals the runtime installs on `window` when a Stage mounts:
 `__videoMeta = { width, height, duration, fps }`, `__seek(t)`, `__ready = true`,
 `__getLayerRects(): LayerRect[]` (bounding boxes of every `[data-layer-id]` in stage coordinates),
 `__setTransparent(bool)` (toggles the Stage background off for alpha export),
-`__whenIdle(): Promise<void>` (resolves once work the current frame waits for — `<Three3D>` fonts and
-textures — is drawn; `src/runtime/pending.ts`).
+`__whenIdle(): Promise<void>` (resolves once work the current frame waits for — web fonts before a
+`<Three3D>` setup or a `useGsapTimeline` build, `<Three3D>` textures — is drawn; `src/runtime/pending.ts`).
 
 ### 3D scenes (`<Three3D>`)
 
@@ -161,6 +164,64 @@ export default function Scene() {
 
 The bundled sample `dolly-3d` (`src/samples/dolly3d.ts`) is the fuller version: fog, an emissive
 accent, a text sign drawn on an `OffscreenCanvas` texture, and 2D title / vignette layers.
+
+### GSAP (`useGsapTimeline`)
+
+GSAP runs on Motion Studio's time, never its own. Importing the runtime pauses
+`gsap.globalTimeline` (a tween made outside the hook never moves) and registers the plugins listed
+above, so scenes need not call `gsap.registerPlugin`. In a component inside a `<Sprite>`:
+
+```jsx
+const ref = useGsapTimeline((tl, scope) => { tl.from(".word", { yPercent: 100, stagger: 0.06 }); }, [deps]);
+return <div ref={ref}>…</div>;
+```
+
+* `build` runs once per mount (again when `deps` change), after web fonts are ready (SplitText
+  measures text; the frame is held meanwhile), inside a `gsap.context` scoped to the ref'd element,
+  on a timeline created with `paused: true`.
+* Every render — every time change — seeks it, in a layout effect, to the Sprite's `localTime`
+  (time 0 = the Sprite's `start`; the stage time outside a Sprite). `seek()` renders synchronously,
+  so under `__seek`'s `flushSync` the styles are written before `__seek` returns; backwards and
+  out-of-order seeks give the same styles (`src/runtime/__tests__/gsap.test.tsx`). Callbacks do not
+  fire (seeks suppress events).
+* Unmount or a `deps` change reverts the context: inline styles and SplitText markup go back to what
+  React rendered. Properties GSAP animates stay out of that element's React `style` prop.
+* No randomness: `"random(…)"` values, `stagger: { from: "random" }` and `gsap.utils.random` are
+  rejected by the AI validator (each export worker would draw different values).
+* Timeline UI: the Sprite's start / end stay draggable and move the whole GSAP animation; GSAP
+  durations, delays and staggers live in code and are not editable on the timeline.
+
+Example (SplitText kinetic typography inside a Sprite):
+
+```jsx
+import React from "react";
+import { SplitText } from "gsap/SplitText";
+import { Stage, Sprite, useGsapTimeline } from "./animations.jsx";
+
+function Headline() {
+  const ref = useGsapTimeline((tl) => {
+    const split = SplitText.create(".headline", { type: "chars,words", mask: "chars" });
+    tl.from(split.chars, { yPercent: 110, rotate: 6, duration: 0.7, ease: "power4.out", stagger: 0.035 });
+  });
+  return (
+    <div ref={ref} style={{ position: "absolute", left: 90, right: 90, top: 760 }}>
+      <h1 className="headline" style={{ margin: 0, color: "#fff", font: "800 140px/1 system-ui" }}>Make it move</h1>
+    </div>
+  );
+}
+
+export default function Scene() {
+  return (
+    <Stage width={1080} height={1920} duration={4} fps={30} background="#0b0b12">
+      <Sprite start={0.3} end={4} data-layer-name="Headline"><Headline /></Sprite>
+    </Stage>
+  );
+}
+```
+
+The bundled sample `kinetic-type` (`src/samples/kineticType.ts`) adds a TextPlugin kicker, a DrawSVG
+stroke and a word-by-word subtitle. GSAP is not MIT-licensed: it ships under GreenSock / Webflow's
+"Standard No Charge" license (gsap.com/community/standard-license).
 
 Plain-HTML projects (no `<Stage>`): the loader wraps the rendered root in a Stage using the
 project's `meta` so everything above still works.
@@ -231,7 +292,8 @@ Module resolution inside `loadProject`: `react` → the page's React; `react-dom
 shim whose `createRoot(el).render(node)` / `render(node, el)` renders `node` into the mount (so
 Claude's `ReactDOM.createRoot(document.getElementById('root')).render(<App/>)` just works);
 `lucide-react` → real package; `three` → the pinned three.js (the same instance `<Three3D>` uses);
-runtime aliases (see §1) → `src/runtime` (`motion.tsx` + `three.tsx`); relative paths →
+`gsap`, `gsap/<Plugin>` → the modules `src/runtime/gsap.tsx` imports and configures (`GSAP_NAMESPACES`);
+runtime aliases (see §1) → `src/runtime` (`motion.tsx`, `three.tsx`, `useGsapTimeline`); relative paths →
 other project files (`.jsx/.js/.tsx/.ts` compiled, `.css` injected as `<style data-file=…>`,
 assets → their data URL string); anything else → `LoadError("Unsupported import 'x' in file y")`.
 The entry file's default export (a component) is rendered; if there is no default export but
@@ -391,7 +453,8 @@ Ship at least **`product-launch`** (1280×720, 8s, 30fps): gradient background, 
 subtitle, three staggered feature cards with lucide icons, a growing bar chart (4 bars) with value
 labels, logo/CTA outro — every top-level element a named `<Sprite>` so the layers panel looks great.
 Written exactly in the §1 style so it doubles as the reference the AI prompt links to. Also shipped:
-`lower-third` (alpha overlay) and `dolly-3d` (1080×1920, a `<Three3D>` layer under 2D titles).
+`lower-third` (alpha overlay), `dolly-3d` (1080×1920, a `<Three3D>` layer under 2D titles) and
+`kinetic-type` (1080×1920, GSAP SplitText / DrawSVG / TextPlugin through `useGsapTimeline`).
 
 ---
 

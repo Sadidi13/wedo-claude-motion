@@ -54,7 +54,22 @@ describe("mergeImports", () => {
     expect(normaliseImportSource("@motion/runtime")).toEqual({ source: "./animations.jsx", supported: true });
     expect(normaliseImportSource("./Card.jsx")).toEqual({ source: "./Card.jsx", supported: true });
     expect(normaliseImportSource("framer-motion")).toEqual({ source: "framer-motion", supported: false });
-    expect(normaliseImportSource("https://esm.sh/gsap")).toEqual({ source: "https://esm.sh/gsap", supported: false });
+    expect(normaliseImportSource("https://esm.sh/animejs")).toEqual({ source: "https://esm.sh/animejs", supported: false });
+  });
+
+  it("provides gsap and its supported plugins (bare, .js and from CDNs) but no other plugins", () => {
+    expect(normaliseImportSource("gsap")).toEqual({ source: "gsap", supported: true });
+    expect(normaliseImportSource("gsap/SplitText.js")).toEqual({ source: "gsap/SplitText", supported: true });
+    for (const url of ["https://esm.sh/gsap@3.15.0", "https://cdn.jsdelivr.net/npm/gsap@3.13.0/+esm", "https://unpkg.com/gsap@3/index.js"]) {
+      expect(normaliseImportSource(url)).toEqual({ source: "gsap", supported: true });
+    }
+    expect(normaliseImportSource("https://esm.sh/gsap@3.15.0/SplitText")).toEqual({ source: "gsap/SplitText", supported: true });
+    expect(normaliseImportSource("https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/DrawSVGPlugin.min.js")).toEqual({
+      source: "gsap/DrawSVGPlugin",
+      supported: true,
+    });
+    expect(normaliseImportSource("gsap/ScrollTrigger")).toMatchObject({ supported: false });
+    expect(normaliseImportSource("https://esm.sh/gsap@3/ScrambleTextPlugin")).toMatchObject({ supported: false });
   });
 
   it("provides three.js (bare and from CDNs) but not its addons", () => {
@@ -174,6 +189,35 @@ describe("assembleScene", () => {
     expect(parseScene(out.source).layers.map((l) => l.kind)).toEqual(["canvas"]);
   });
 
+  it("imports the gsap globals of CDN script pages and warns when GSAP runs outside useGsapTimeline", () => {
+    const stage = "<Stage width={2} height={2} duration={1} fps={1}><Sprite><Title /></Sprite></Stage>";
+    const driven = assembleScene({
+      code: [
+        "function Title() {",
+        '  const ref = useGsapTimeline((tl) => { const s = SplitText.create("h1", { type: "chars" }); tl.from(s.chars, { y: 20, stagger: 0.05 }); });',
+        "  return <div ref={ref}><h1>Hi</h1></div>;",
+        "}",
+        `function Scene() { return ${stage}; }`,
+      ].join("\n"),
+      cssImports: [],
+      fallbackMeta: meta,
+    });
+    expect(driven.source.split("\n").slice(0, 3)).toEqual([
+      'import React from "react";',
+      'import { SplitText } from "gsap/SplitText";',
+      'import { Stage, Sprite, useGsapTimeline } from "./animations.jsx";',
+    ]);
+    expect(driven.warnings).toEqual([]);
+
+    const playing = assembleScene({
+      code: `function Title() { gsap.to("h1", { y: 20 }); return <h1>Hi</h1>; }\nfunction Scene() { return ${stage}; }`,
+      cssImports: [],
+      fallbackMeta: meta,
+    });
+    expect(playing.source).toContain('import { gsap } from "gsap";');
+    expect(playing.warnings).toEqual([expect.stringContaining("uses GSAP outside useGsapTimeline")]);
+  });
+
   it("keeps a module scene's own three import and warns about three.js addons", () => {
     const code = [
       'import React from "react";',
@@ -188,7 +232,7 @@ describe("assembleScene", () => {
     expect(out.warnings).toEqual([
       expect.stringContaining('Import "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js" cannot be loaded'),
     ]);
-    expect(out.warnings[0]).toContain("only react, react-dom, lucide-react, three, the runtime");
+    expect(out.warnings[0]).toContain("only react, react-dom, lucide-react, three, gsap and its supported plugins, the runtime");
   });
 
   it("warns about scenes that ship their own Stage implementation", () => {

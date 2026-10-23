@@ -123,4 +123,23 @@ describe("status", () => {
     expect(raw.framesDone).toBe(25);
     expect(raw.state).toBe("queued");
   });
+
+  it("keeps writing while the status is being polled (Windows refuses renames over open files)", { timeout: 30_000 }, async () => {
+    const { jobId } = await createJob(makeRequest());
+    let polling = true;
+    // far more often than the editor's poll, which runs about once a second
+    const poll = (async () => {
+      while (polling) {
+        await readStatus(jobId);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+    })();
+    try {
+      for (let i = 1; i <= 40; i++) await writeStatus(jobId, { framesDone: i });
+    } finally {
+      polling = false;
+      await poll;
+    }
+    expect(await readStatus(jobId)).toMatchObject({ framesDone: 40 });
+  });
 });

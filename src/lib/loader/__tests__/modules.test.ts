@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { GSAP_MODULES, type GsapModule } from "@/lib/gsapModules";
 import type { ProjectFile } from "@/lib/types";
 import { LoadError } from "../errors";
 import { createModuleSystem, type ModuleSystemOptions } from "../modules";
@@ -12,6 +13,14 @@ const fakeReact = {
 
 const runtime = { Stage: "Stage", Sprite: "Sprite", useTime: () => 0 };
 
+/** `gsap` and each plugin subpath, exporting `{ <Name>: "<Name>" }` with that as the default too. */
+const gsapStandIns = Object.fromEntries(
+  GSAP_MODULES.map((name) => {
+    const exportName = name === "gsap" ? "gsap" : name.slice("gsap/".length);
+    return [name, asEsModule({ [exportName]: exportName }, exportName)];
+  }),
+) as Record<GsapModule, unknown>;
+
 function system(files: Record<string, ProjectFile>, overrides: Partial<ModuleSystemOptions> = {}) {
   const injectCss = vi.fn();
   const sys = createModuleSystem({
@@ -23,6 +32,7 @@ function system(files: Record<string, ProjectFile>, overrides: Partial<ModuleSys
       "react-dom": createReactDomShim(() => {}),
       "lucide-react": asEsModule({ Star: "Star" }),
       three: asEsModule({ Mesh: "Mesh", REVISION: "186" }),
+      ...gsapStandIns,
       runtime: asEsModule(runtime),
     },
     ...overrides,
@@ -114,6 +124,19 @@ export const all = [THREE.REVISION, Mesh, three.Mesh];`,
       ),
     });
     expect((sys.load("scene.jsx") as { all: unknown[] }).all).toEqual(["186", "Mesh", "Mesh"]);
+  });
+
+  it("hands out gsap and its supported plugins, default and named, .js spelling included", () => {
+    const { sys } = system({
+      "scene.jsx": file(
+        "scene.jsx",
+        `import gsapDefault, { gsap } from "gsap";
+import { SplitText } from "gsap/SplitText";
+import DrawSVG from "gsap/DrawSVGPlugin.js";
+export const all = [gsapDefault, gsap, SplitText, DrawSVG];`,
+      ),
+    });
+    expect((sys.load("scene.jsx") as { all: unknown[] }).all).toEqual(["gsap", "gsap", "SplitText", "DrawSVGPlugin"]);
   });
 
   it("throws LoadError for unsupported imports, naming the importing file", () => {

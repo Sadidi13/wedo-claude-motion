@@ -147,6 +147,28 @@ ReactDOM.createRoot(document.getElementById("root")).render(<Scene />);
     expect(layers[0].children.map((l) => l.kind)).toEqual(["canvas"]);
   });
 
+  it("drops the GSAP CDN builds it provides, warns about other GSAP plugins, and imports the globals", () => {
+    const html = `<script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/SplitText.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/ScrollTrigger.min.js"></script>
+<script type="text/babel">
+function Title() {
+  const ref = useGsapTimeline((tl) => { tl.from(SplitText.create("h1", { type: "words" }).words, { opacity: 0, stagger: 0.1 }); });
+  return <div ref={ref}><h1>Hello there</h1></div>;
+}
+function Scene() {
+  return <Stage width={640} height={360} duration={3} fps={30}><Sprite start={0} end={3}><Title /></Sprite></Stage>;
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Scene />);
+</script>`;
+    const { project, warnings } = importFromHtmlDetailed(html);
+    const scene = project.files["scene.jsx"].content;
+    expect(warnings).toEqual([expect.stringContaining("ScrollTrigger.min.js")]);
+    expect(scene).toContain('import { SplitText } from "gsap/SplitText";');
+    expect(scene).toContain('import { Stage, Sprite, useGsapTimeline } from "./animations.jsx";');
+    expect(scene).not.toContain("jsdelivr");
+  });
+
   it("returns an empty Stage with a warning for an empty page and exposes the plain variant", () => {
     const { project, warnings } = importFromHtmlDetailed("<html><body></body></html>");
     expect(warnings).toEqual([expect.stringContaining("empty Stage")]);

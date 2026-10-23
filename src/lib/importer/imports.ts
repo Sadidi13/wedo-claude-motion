@@ -8,9 +8,11 @@
  * something actually has to change (`MergeResult.changed`), so a clean
  * scene.jsx keeps its import lines byte-for-byte. CDN URLs for the packages
  * the loader provides are normalised to their bare names (for three.js only
- * the main module: addons such as `three/addons/…` are not provided), and the
- * runtime is always referenced as "./animations.jsx".
+ * the main module: addons such as `three/addons/…` are not provided; for GSAP
+ * the core and the GSAP_PLUGINS), and the runtime is always referenced as
+ * "./animations.jsx".
  */
+import { gsapModuleFor } from "@/lib/gsapModules";
 import type { ImportInfo, ImportSpecifierInfo } from "./ast";
 
 export const RUNTIME_SPECIFIER = "./animations.jsx";
@@ -33,9 +35,20 @@ const URL_PACKAGES: { pattern: RegExp; name: string }[] = [
   { pattern: /\/lucide-react(@[^/]*)?(\/|\?|$)/, name: "lucide-react" },
   // esm.sh/three@x, unpkg / jsdelivr …/three@x/build/three.module(.min).js or /+esm — never three/addons/…
   { pattern: /\/three(@[^/?#]*)?(\/build\/three\.module(\.min)?\.js|\/\+esm)?([?#].*)?$/, name: "three" },
+  // esm.sh/gsap@x, …/gsap@x/index.js, …/gsap@x/dist/gsap(.min).js or /+esm
+  { pattern: /\/gsap(@[^/?#]*)?(\/index\.js|\/dist\/gsap(\.min)?\.js|\/\+esm)?([?#].*)?$/, name: "gsap" },
 ];
 
+/** A GSAP plugin file on a CDN: …/gsap@x/SplitText(.js) or …/gsap@x/dist/SplitText(.min).js. */
+const GSAP_PLUGIN_URL = /\/gsap(?:@[^/?#]*)?\/(?:dist\/)?(\w+?)(?:\.min)?(?:\.js)?(?:[?#].*)?$/;
+
 const RUNTIME_SOURCE = /^(?:\.\/|\/)?(?:src\/)?animations(?:\.(?:jsx|js|tsx|ts))?$|^(?:@motion\/runtime|motion-runtime)$/;
+
+/** The provided GSAP module a CDN URL points at (`gsap/SplitText`), if any. */
+export function gsapPluginFromUrl(url: string): string | undefined {
+  const name = GSAP_PLUGIN_URL.exec(url)?.[1];
+  return name ? gsapModuleFor(`gsap/${name}`) : undefined;
+}
 
 /**
  * Map an import source to what the loader understands:
@@ -49,9 +62,12 @@ export function normaliseImportSource(source: string): { source: string; support
     for (const { pattern, name } of URL_PACKAGES) {
       if (pattern.test(source)) return { source: name, supported: true };
     }
-    return { source, supported: false };
+    const plugin = gsapPluginFromUrl(source);
+    return plugin ? { source: plugin, supported: true } : { source, supported: false };
   }
   if (source.startsWith("./") || source.startsWith("../") || source.startsWith("/")) return { source, supported: true };
+  const gsap = gsapModuleFor(source);
+  if (gsap) return { source: gsap, supported: true };
   return { source, supported: PROVIDED_MODULES.has(source) };
 }
 

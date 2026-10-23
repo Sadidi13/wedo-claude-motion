@@ -7,6 +7,7 @@
 import { ensureLayerIds, parseScene } from "@/lib/parser";
 import type { Project } from "@/lib/types";
 import { DOLLY_3D_SOURCE } from "./dolly3d";
+import { KINETIC_TYPE_SOURCE } from "./kineticType";
 import { LOWER_THIRD_SOURCE } from "./lowerThird";
 import { PRODUCT_LAUNCH_SOURCE } from "./productLaunch";
 
@@ -56,5 +57,12 @@ export const samples: Sample[] = [
     description:
       "1080×1920, 6 s. A three.js layer: the camera glides down a corridor of lit boxes towards a glowing sign, then a title lands.",
     project: sampleProject("dolly-3d", "3D dolly", DOLLY_3D_SOURCE),
+  },
+  {
+    id: "kinetic-type",
+    name: "Kinetic type (GSAP)",
+    description:
+      "1080×1920, 5 s. GSAP timelines driven by the playhead: a typed kicker, a SplitText headline rising letter by letter, a drawn SVG stroke and a word-by-word subtitle.",
+    project: sampleProject("kinetic-type", "Kinetic type", KINETIC_TYPE_SOURCE),
   },
 ];

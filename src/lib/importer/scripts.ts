@@ -5,8 +5,9 @@
  *   inline (no type | javascript | module) with React  → scene code
  *   inline plain JavaScript / data blocks              → skipped (+ warning)
  *   external React / ReactDOM / Babel / runtime CDN    → dropped (we provide them)
- *   external three.js main build (global THREE)        → dropped (provided; the
- *                                                        assembler imports it)
+ *   external three.js main build (global THREE),
+ *   GSAP core + supported plugins (global gsap, …)     → dropped (provided; the
+ *                                                        assembler imports them)
  *   external relative file present in the archive      → inlined into the scene
  *   other external scripts                             → dropped with a warning
  *
@@ -15,6 +16,7 @@
 import type { ProjectFile } from "@/lib/types";
 import { isSourceKind, normaliseProjectPath } from "./files";
 import type { ScriptBlock } from "./htmlExtract";
+import { gsapPluginFromUrl } from "./imports";
 import { readVideoMeta, type MetaHints } from "./meta";
 
 const JSX_TYPES = new Set(["text/babel", "text/jsx", "text/typescript", "text/tsx", "application/typescript"]);
@@ -25,6 +27,8 @@ const DATA_TYPES = new Set(["importmap", "application/json", "application/ld+jso
 const PROVIDED_CDN = /\b(react|react-dom|babel|animations|motion-runtime)\b/i;
 /** The three.js main build (`…/three@x/build/three(.module)(.min).js`); addons are not provided. */
 const THREE_CDN = /\/three(@[^/?#]*)?\/build\/three(\.module)?(\.min)?\.js([?#].*)?$/i;
+/** The GSAP core build (`…/gsap@x/dist/gsap(.min).js`); supported plugins are matched by gsapPluginFromUrl. */
+const GSAP_CDN = /\/gsap(@[^/?#]*)?\/dist\/gsap(\.min)?\.js([?#].*)?$/i;
 /** The runtime file next to the page; the loader aliases every spelling of it. */
 const RUNTIME_FILE = /(^|\/)animations(\.(jsx|js|tsx|ts))?$/;
 const REACT_HINTS =
@@ -45,9 +49,9 @@ function scriptType(attrs: Record<string, string>): string {
 
 function collectExternal(src: string, files: Record<string, ProjectFile>, parts: string[], warnings: string[]): void {
   if (/^(https?:)?\/\//i.test(src)) {
-    if (PROVIDED_CDN.test(src) || THREE_CDN.test(src)) return;
+    if (PROVIDED_CDN.test(src) || THREE_CDN.test(src) || GSAP_CDN.test(src) || gsapPluginFromUrl(src)) return;
     warnings.push(
-      `External script "${src}" was dropped; Motion Studio provides React, Babel, three.js and the Motion runtime itself`,
+      `External script "${src}" was dropped; Motion Studio provides React, Babel, three.js, GSAP and the Motion runtime itself`,
     );
     return;
   }

@@ -4,7 +4,7 @@ import path from "node:path";
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
 import { parseScene } from "@/lib/parser";
-import { THREE_VERSION, exportProjectZip } from "../exportZip";
+import { GSAP_VERSION, THREE_VERSION, exportProjectZip } from "../exportZip";
 import { importFromZip, importFromZipDetailed } from "../zip";
 import { CLEAN_SCENE, PNG_BASE64, PNG_BYTES } from "./fixtures";
 
@@ -91,6 +91,7 @@ describe("exportProjectZip", () => {
     const index = await zip.file("index.html")!.async("string");
     expect(index).toContain('"react": "https://esm.sh/react@19"');
     expect(index).toContain(`"three": "https://esm.sh/three@${THREE_VERSION}"`);
+    expect(index).toContain(`"gsap/": "https://esm.sh/gsap@${GSAP_VERSION}/"`);
     expect(index).toContain("importmap");
     expect(index).toContain("animations.jsx");
     expect(await zip.file("README.txt")!.async("string")).toContain("Motion Studio");
@@ -102,10 +103,11 @@ describe("exportProjectZip", () => {
     expect(again).toMatchObject({ name: "Zip scene", entry: "scene.jsx", createdAt: original.createdAt });
   });
 
-  it("names the same three.js version that package.json pins", () => {
+  it("names the same three.js and GSAP versions that package.json pins", () => {
     const pkg = JSON.parse(readFileSync(path.join(process.cwd(), "package.json"), "utf8")) as {
       dependencies: Record<string, string>;
     };
     expect(pkg.dependencies.three).toBe(THREE_VERSION);
+    expect(pkg.dependencies.gsap).toBe(GSAP_VERSION);
   });
 });

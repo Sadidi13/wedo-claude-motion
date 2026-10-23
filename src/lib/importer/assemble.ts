@@ -12,6 +12,7 @@
  *
  * All changes to the author's code are offset splices; nothing is regenerated.
  */
+import { GSAP_PLUGINS } from "@/lib/gsapModules";
 import type { StageMeta } from "@/lib/types";
 import { analyseModule, type DeclarationInfo, type ModuleAnalysis } from "./ast";
 import {
@@ -51,7 +52,7 @@ const ROOT_COMPONENT = "MotionStudioRoot";
 const PREFERRED_ROOTS = ["Scene", "App", "Animation", "Main", "Root"];
 const RUNTIME_EXPORTS = [
   "Stage", "Sprite", "useTime", "useTimeline", "useSprite", "useStage",
-  "Easing", "interpolate", "animate", "clamp", "lerp", "Three3D",
+  "Easing", "interpolate", "animate", "clamp", "lerp", "Three3D", "useGsapTimeline",
 ];
 
 interface Edit {
@@ -138,7 +139,7 @@ export function assembleScene(input: AssembleInput): AssembleResult {
   const merge = mergeImports(a.imports);
   for (const source of merge.unsupported) {
     warnings.push(
-      `Import "${source}" cannot be loaded inside Motion Studio (only react, react-dom, lucide-react, three, the runtime and project files are available)`,
+      `Import "${source}" cannot be loaded inside Motion Studio (only react, react-dom, lucide-react, three, gsap and its supported plugins, the runtime and project files are available)`,
     );
   }
   const edits: Edit[] = merge.changed
@@ -205,8 +206,8 @@ export function assembleScene(input: AssembleInput): AssembleResult {
 }
 
 /**
- * Add the React / ReactDOM / runtime / three.js imports that the code uses as
- * globals (Babel-standalone pages with CDN <script> tags, generated wrappers).
+ * Add the React / ReactDOM / runtime / three.js / GSAP imports that the code
+ * uses as globals (Babel-standalone pages with CDN <script> tags, generated wrappers).
  * JSX needs `React` in scope under the classic runtime, so any JSX counts as a
  * use of `React`.
  */
@@ -224,8 +225,19 @@ function repairImports(
     ensureDefaultImport(target, bound, "react-dom/client", "ReactDOM");
   }
   if (!declared("THREE") && usesIdentifier(body, "THREE")) ensureNamespaceImport(target, bound, "three", "THREE");
+  if (!declared("gsap") && usesIdentifier(body, "gsap")) ensureNamedImport(target, bound, "gsap", ["gsap"]);
+  for (const plugin of GSAP_PLUGINS) {
+    if (!declared(plugin) && usesIdentifier(body, plugin)) ensureNamedImport(target, bound, `gsap/${plugin}`, [plugin]);
+  }
   const runtimeNames = RUNTIME_EXPORTS.filter((name) => !declared(name) && usesIdentifier(body, name));
   if (runtimeNames.length) ensureNamedImport(target, bound, RUNTIME_SPECIFIER, runtimeNames);
+
+  // GSAP plays only through useGsapTimeline: the runtime pauses GSAP's own clock.
+  if (usesIdentifier(body, "gsap") && !usesIdentifier(body, "useGsapTimeline")) {
+    warnings.push(
+      "The scene uses GSAP outside useGsapTimeline; Motion Studio drives GSAP from its timeline, so tweens made elsewhere stay frozen until they move into a useGsapTimeline build",
+    );
+  }
 
   const ownRuntime = ["Stage", "Sprite"].filter((name) => a.declared.has(name) && !bindsLocal(bound, name));
   if (ownRuntime.length) {

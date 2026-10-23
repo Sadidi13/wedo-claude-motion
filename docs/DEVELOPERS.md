@@ -85,10 +85,14 @@ export default function Scene() {
 
 * Motion is a pure function of time (`useTime`, `useSprite`, `interpolate`, `animate`, `Easing`).
   No CSS transitions/keyframes, timers or randomness.
-* Allowed imports: `react`, `react-dom`, `lucide-react`, `three` (pinned; main module only), the
-  runtime (`./animations.jsx`) and relative project files (`.jsx`, `.css`, assets).
+* Allowed imports: `react`, `react-dom`, `lucide-react`, `three` (pinned; main module only), `gsap`
+  (pinned) with the plugins in `src/lib/gsapModules.ts`, the runtime (`./animations.jsx`) and
+  relative project files (`.jsx`, `.css`, assets).
 * 3D: the runtime's `<Three3D setup render>` draws a three.js scene as one layer, still a pure
   function of time (`docs/CONTRACTS.md` §1 "3D scenes", sample `dolly-3d`).
+* GSAP: `useGsapTimeline(build, deps)` builds a paused timeline that the runtime seeks to the
+  Sprite's local time (`docs/CONTRACTS.md` §1 "GSAP", sample `kinetic-type`). GSAP itself is not
+  MIT: it is under GreenSock / Webflow's "Standard No Charge" license.
 * Every element inside the Stage gets a stable `data-layer-id` (added automatically).
 
 ## Environment variables

@@ -4,7 +4,7 @@
  * (CONTRACTS.md §3). Flow:
  *
  *   1. build the module table, evaluate the entry file through the mini
- *      module system (react / react-dom shim / lucide-react / three / runtime builtins);
+ *      module system (react / react-dom shim / lucide-react / three / gsap / runtime builtins);
  *   2. pick the root element: the entry's default export component, or the
  *      node captured from `ReactDOM.createRoot(...).render(...)`;
  *   3. render it into `mount` with the real `createRoot`, inside an error
@@ -20,9 +20,11 @@ import React, { Component, useLayoutEffect, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import * as lucide from "lucide-react";
 import * as THREE from "three";
+import type { GsapModule } from "@/lib/gsapModules";
 import type { Project, StageMeta } from "@/lib/types";
 import * as runtime from "@/runtime";
 import { motionWindow } from "@/runtime/globals";
+import { GSAP_NAMESPACES } from "@/runtime/gsap";
 import { LoadError } from "./errors";
 import { createModuleSystem } from "./modules";
 import { normalisePath } from "./paths";
@@ -104,6 +106,12 @@ function pickRootElement(entryExports: unknown, captured: ReactNode | undefined,
   );
 }
 
+/** `gsap` and its plugin subpaths; the default import is the module's own default (gsap / the plugin). */
+function gsapBuiltins(): Record<GsapModule, unknown> {
+  const entries = Object.entries(GSAP_NAMESPACES).map(([name, ns]) => [name, asEsModule(ns, (ns as { default?: unknown }).default ?? ns)]);
+  return Object.fromEntries(entries) as Record<GsapModule, unknown>;
+}
+
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
@@ -170,6 +178,7 @@ export async function loadProject(project: Project, mount: HTMLElement, opts: Lo
       }),
       "lucide-react": asEsModule(lucide),
       three: asEsModule(THREE),
+      ...gsapBuiltins(),
       runtime: asEsModule(runtime),
     },
   });

@@ -27,6 +27,15 @@ describe("resolveSpecifier: builtins and aliases", () => {
     expect(resolveSpecifier("scene.jsx", "lucide-react", files)).toEqual({ kind: "builtin", name: "lucide-react" });
   });
 
+  it("maps gsap and its supported plugins, but not the others", () => {
+    expect(resolveSpecifier("scene.jsx", "gsap", files)).toEqual({ kind: "builtin", name: "gsap" });
+    expect(resolveSpecifier("scene.jsx", "gsap/SplitText", files)).toEqual({ kind: "builtin", name: "gsap/SplitText" });
+    expect(resolveSpecifier("scene.jsx", "gsap/MorphSVGPlugin.js", files)).toEqual({ kind: "builtin", name: "gsap/MorphSVGPlugin" });
+    for (const other of ["gsap/ScrambleTextPlugin", "gsap/ScrollTrigger", "gsap/all", "gsap/dist/SplitText", "@gsap/react"]) {
+      expect(() => resolveSpecifier("scene.jsx", other, files)).toThrowError(`Unsupported import '${other}' in file scene.jsx`);
+    }
+  });
+
   it("maps three, but not three.js addons (only the main module is provided)", () => {
     expect(resolveSpecifier("scene.jsx", "three", files)).toEqual({ kind: "builtin", name: "three" });
     for (const addon of ["three/addons/controls/OrbitControls.js", "three/examples/jsm/postprocessing/EffectComposer.js"]) {

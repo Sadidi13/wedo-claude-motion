@@ -13,6 +13,8 @@ import { normaliseProjectPath } from "./files";
 export const MANIFEST_GENERATOR = "motion-studio";
 /** The exact three.js version Motion Studio provides (package.json pins the same). */
 export const THREE_VERSION = "0.186.1";
+/** The exact GSAP version Motion Studio provides (package.json pins the same). */
+export const GSAP_VERSION = "3.15.0";
 
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch] ?? ch);
@@ -35,7 +37,9 @@ function standaloneIndexHtml(project: Project): string {
     "react-dom": "https://esm.sh/react-dom@19",
     "react-dom/client": "https://esm.sh/react-dom@19/client",
     "lucide-react": "https://esm.sh/lucide-react?deps=react@19",
-    "three": "https://esm.sh/three@${THREE_VERSION}"
+    "three": "https://esm.sh/three@${THREE_VERSION}",
+    "gsap": "https://esm.sh/gsap@${GSAP_VERSION}",
+    "gsap/": "https://esm.sh/gsap@${GSAP_VERSION}/"
   }
 }
 </script>

@@ -26,6 +26,9 @@ describe("findDisallowedImports", () => {
 import ReactDOM from "react-dom/client";
 import { Zap } from 'lucide-react';
 import * as THREE from "three";
+import gsap from "gsap";
+import { SplitText } from "gsap/SplitText";
+import { DrawSVGPlugin } from "gsap/DrawSVGPlugin.js";
 import { Stage } from "./animations.jsx";
 import { Card } from "../shared/Card.jsx";
 import "./styles.css";
@@ -37,7 +40,7 @@ export { Stage } from "motion-runtime";`;
 
   it("flags every other specifier once, across import forms", () => {
     const src = `import { motion } from "framer-motion";
-import gsap from 'gsap';
+import anime from 'animejs';
 import "https://cdn.example.com/lib.js";
 import {
   a,
@@ -48,13 +51,18 @@ const x = require("lodash");
 const y = await import("remotion");`;
     expect(findDisallowedImports(src)).toEqual([
       "framer-motion",
-      "gsap",
+      "animejs",
       "https://cdn.example.com/lib.js",
       "three/addons/controls/OrbitControls.js",
       "lodash",
       "remotion",
     ]);
     expect(isAllowedImport("three")).toBe(true);
+    expect(isAllowedImport("gsap/MotionPathPlugin")).toBe(true);
+    expect(findDisallowedImports('import { ScrambleTextPlugin } from "gsap/ScrambleTextPlugin";\nimport { useGSAP } from "@gsap/react";')).toEqual([
+      "gsap/ScrambleTextPlugin",
+      "@gsap/react",
+    ]);
     expect(isAllowedImport("react")).toBe(true);
     expect(isAllowedImport("/abs/path.js")).toBe(false);
   });
@@ -70,6 +78,13 @@ describe("findForbiddenCalls", () => {
   it("finds three.js render loops and the performance clock, but allows seeded randomness", () => {
     const src = "renderer.setAnimationLoop(draw); const t0 = performance.now(); const v = THREE.MathUtils.seededRandom(3);";
     expect(findForbiddenCalls(src)).toEqual(["setAnimationLoop", "performance.now"]);
+  });
+
+  it("finds GSAP randomness, which differs between export workers", () => {
+    const src = `tl.to(".dot", { x: "random(-50, 50)", stagger: { each: 0.1, from: "random" } });
+const r = gsap.utils.random(0, 1);
+tl.to(".dot", { stagger: { from: "center" }, ease: "power2.out" });`;
+    expect(findForbiddenCalls(src)).toEqual(["utils.random", '"random(…)"', 'from: "random"']);
   });
 });
 
@@ -122,8 +137,8 @@ describe("validateAiOutput — layer scope", () => {
       "forbidden time/random API(s): Math.random",
     );
     expectError(
-      validateAiOutput({ summary: "ok", code: '<div data-layer-id="title">{require("gsap")}</div>' }, layerCtx),
-      'disallowed module(s): "gsap"',
+      validateAiOutput({ summary: "ok", code: '<div data-layer-id="title">{require("animejs")}</div>' }, layerCtx),
+      'disallowed module(s): "animejs"',
     );
   });
 
@@ -168,8 +183,8 @@ describe("validateAiOutput — scene / new scope", () => {
   });
 
   it("rejects disallowed imports and forbidden calls in the entry file", () => {
-    const withGsap = GOOD_SCENE_CODE.replace('import React from "react";', 'import React from "react";\nimport gsap from "gsap";');
-    expectError(validateAiOutput({ summary: "ok", code: withGsap }, newCtx), 'disallowed module(s): "gsap"');
+    const withAnime = GOOD_SCENE_CODE.replace('import React from "react";', 'import React from "react";\nimport anime from "animejs";');
+    expectError(validateAiOutput({ summary: "ok", code: withAnime }, newCtx), 'disallowed module(s): "animejs"');
     const withTimer = GOOD_SCENE_CODE.replace("<h1>Hi</h1>", "<h1>{setTimeout(() => 1, 0)}</h1>");
     expectError(validateAiOutput({ summary: "ok", code: withTimer }, newCtx), "setTimeout");
   });
@@ -198,8 +213,8 @@ describe("validateAiOutput — helper files", () => {
       "must not contain the entry file",
     );
     expectError(
-      validateAiOutput({ summary: "ok", code: GOOD_LAYER_CODE, files: [{ path: "Card.tsx", content: 'import x from "gsap";' }] }, layerCtx),
-      'File "Card.tsx" imports disallowed module(s): "gsap"',
+      validateAiOutput({ summary: "ok", code: GOOD_LAYER_CODE, files: [{ path: "Card.tsx", content: 'import x from "animejs";' }] }, layerCtx),
+      'File "Card.tsx" imports disallowed module(s): "animejs"',
     );
   });
 });

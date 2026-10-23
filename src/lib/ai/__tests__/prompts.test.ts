@@ -31,6 +31,12 @@ describe("SYSTEM_PROMPT", () => {
       "`THREE.MathUtils.seededRandom(i + 1)`",
       'textures={{ logo: "assets/logo.png" }}',
       "<Three3D",
+      "`gsap/SplitText`",
+      "| `useGsapTimeline(build, deps?)` |",
+      "# 4. GSAP timelines",
+      "seeked to the Sprite's local time on every frame",
+      "cannot be edited on the timeline",
+      '`stagger: { from: "random" }`',
       "`@motion/runtime`",
       "`data-layer-id`",
       "`data-layer-name`",
@@ -57,14 +63,20 @@ describe("SYSTEM_PROMPT", () => {
     expect(system[0]).toEqual({ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } });
   });
 
-  it("ships a 3D example that passes its own validation as a new scene", () => {
-    const example = /```jsx\n([\s\S]*?)```/.exec(SYSTEM_PROMPT)?.[1];
-    expect(example).toContain("<Three3D");
-    const result = validateAiOutput({ summary: "3D example", code: example ?? "" }, { scope: "new", entryPath: "scene.jsx" });
-    expect(result).toMatchObject({ ok: true });
-    const parsed = parseScene(result.ok ? (result.sceneCode ?? "") : "");
-    expect(parsed.layers.map((layer) => layer.name)).toEqual(["3D boxes", "Title"]);
-    expect(parsed.layers[0].children.map((layer) => layer.kind)).toEqual(["canvas"]);
+  it("ships a 3D and a GSAP example that pass their own validation as new scenes", () => {
+    const examples = [...SYSTEM_PROMPT.matchAll(/```jsx\n([\s\S]*?)```/g)].map((match) => match[1]);
+    expect(examples).toHaveLength(2);
+    const [threeD, gsap] = examples.map((code) => {
+      const result = validateAiOutput({ summary: "example", code }, { scope: "new", entryPath: "scene.jsx" });
+      expect(result).toMatchObject({ ok: true });
+      return { code, scene: parseScene(result.ok ? (result.sceneCode ?? "") : "") };
+    });
+    expect(threeD.code).toContain("<Three3D");
+    expect(threeD.scene.layers.map((layer) => layer.name)).toEqual(["3D boxes", "Title"]);
+    expect(threeD.scene.layers[0].children.map((layer) => layer.kind)).toEqual(["canvas"]);
+    expect(gsap.code).toContain('import { SplitText } from "gsap/SplitText";');
+    expect(gsap.code).toContain("useGsapTimeline");
+    expect(gsap.scene.layers.map((layer) => layer.name)).toEqual(["Headline"]);
   });
 });
 

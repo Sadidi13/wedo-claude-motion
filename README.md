@@ -123,4 +123,6 @@ See [SECURITY.md](SECURITY.md) for details and how to report a problem.
 ## License
 
 MIT, see [LICENSE](LICENSE). Export uses the ffmpeg build that `ffmpeg-static` downloads at install
-time (GPL). It is not part of this repository.
+time (GPL). It is not part of this repository. Scenes can use [GSAP](https://gsap.com), installed as
+a dependency under GreenSock / Webflow's own "Standard No Charge" license
+(gsap.com/community/standard-license), not MIT; three.js is MIT.

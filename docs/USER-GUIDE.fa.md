@@ -210,7 +210,8 @@ export default function Scene() {
 ```
 
 - حرکت فقط تابع زمان است: `useTime`, `useSprite`, `interpolate`, `animate`, `Easing`. بدون CSS transition/keyframes، بدون `setTimeout`/`Math.random`.
-- ایمپورت‌های مجاز: `react`، `react-dom`، `lucide-react`، `three` (فقط ماژول اصلی three.js، بدون addonها)، `./animations.jsx` و فایل‌های نسبی پروژه (`./Card.jsx`, `./styles.css`, `assets/logo.png`).
+- ایمپورت‌های مجاز: `react`، `react-dom`، `lucide-react`، `three` (فقط ماژول اصلی three.js، بدون addonها)، `gsap` با پلاگین‌های `SplitText`، `DrawSVGPlugin`، `MorphSVGPlugin`، `MotionPathPlugin`، `CustomEase` و `TextPlugin` (مثلاً `gsap/SplitText`)، `./animations.jsx` و فایل‌های نسبی پروژه (`./Card.jsx`, `./styles.css`, `assets/logo.png`).
+- GSAP: انیمیشن را فقط داخل `useGsapTimeline((tl) => { … })` در کامپوننتی داخل یک Sprite بساز. خود ویرایشگر تایم‌لاین GSAP را با زمان Sprite جلو و عقب می‌برد، پس اسکراب و خروجی دقیق است. زمان شروع و پایان Sprite روی تایم‌لاین قابل کشیدن است، ولی زمان‌بندی داخلی GSAP فقط در کد است. نمونهٔ آماده: **Kinetic type (GSAP)** در پنجرهٔ Import. لایسنس GSAP مثل بقیهٔ پروژه MIT نیست.
 - سه‌بعدی واقعی: `<Three3D>` یک صحنهٔ three.js را به‌صورت **یک لایه** می‌کشد. `setup` صحنه را یک بار می‌سازد و `render(t, …)` در هر فریم دوربین و اشیا را فقط از روی زمان `t` تنظیم می‌کند (بدون `+=`، بدون `setAnimationLoop`). عنوان‌ها لایه‌های دوبعدی معمولی روی آن هستند. نمونهٔ آماده: **3D dolly** در پنجرهٔ Import.
 - هر المان داخل Stage یک `data-layer-id` پایدار می‌گیرد (خودکار). نام دلخواه با `data-layer-name`.
 

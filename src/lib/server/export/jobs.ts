@@ -10,8 +10,8 @@
  *
  * Job ids are nanoid strings over [a-z0-9]; `jobDir` refuses anything else so a
  * request can never reach outside the jobs root. Status writes are atomic
- * (temp file + rename) and serialised per job so parallel render workers
- * cannot clobber each other's read-modify-write.
+ * (temp file + rename, retried on Windows locks) and serialised per job so
+ * parallel render workers cannot clobber each other's read-modify-write.
  */
 
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -49,10 +49,28 @@ async function readJson<T>(file: string): Promise<T | null> {
   }
 }
 
+const RETRYABLE_RENAME = new Set(["EPERM", "EBUSY", "EACCES"]);
+/** Rename retries on Windows: every 10 ms for up to half a second (a blocked rename clears within ~30 ms). */
+const RENAME_ATTEMPTS = 50;
+const RENAME_RETRY_MS = 10;
+
 async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   await writeFile(tmp, JSON.stringify(value), "utf8");
-  await rename(tmp, file);
+  // Windows refuses to replace a file another handle is reading (the status poll); readers are quick.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(tmp, file);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? "";
+      if (attempt >= RENAME_ATTEMPTS || !RETRYABLE_RENAME.has(code)) {
+        await rm(tmp, { force: true });
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, RENAME_RETRY_MS));
+    }
+  }
 }
 
 /**
