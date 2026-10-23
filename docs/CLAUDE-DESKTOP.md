@@ -1,7 +1,11 @@
 # Claude Desktop bridge
 
-Connects a Claude session (the Claude desktop app's Code tab, or Claude Code) to the running editor,
-so Claude can work on scenes with a Claude subscription instead of an API key.
+Connects Claude to the running editor, so Claude can work on scenes with a Claude subscription
+instead of an API key. Two kinds of Claude session can use it:
+
+- a **Code session** (the Claude desktop app's Code tab, or Claude Code) runs `scripts/motion-bridge.mjs`;
+- the **regular Claude chat** in Claude Desktop uses the MCP connector `scripts/motion-studio-mcp.mjs`
+  (see "Claude chat connector" below).
 
 - **Chat → editor.** Ask for a video in the chat: Claude writes a layered scene and it opens in the
   editor as a new project. Ask for a change: Claude edits the open project and the editor applies it
@@ -21,8 +25,10 @@ useBridgeSync ── GET requests/<id> ─ (state, result) ◄── POST …/re
              ◄── GET status ──────── listener.json (heartbeat of wait)
 ```
 
-- State lives in files under `os.tmpdir()/motion-studio/bridge/` (`MOTION_STUDIO_BRIDGE_DIR` to
-  override). It survives dev-server restarts. Ids are time-ordered, so "oldest pending request" and
+- State lives in files under `<repo>/.motion-bridge/state/` (git-ignored; `MOTION_STUDIO_BRIDGE_DIR`
+  to override). It survives dev-server restarts. It is deliberately not in the OS temp folder:
+  Microsoft Store apps such as Claude Desktop give their child processes a redirected view of
+  AppData, so the connector could read a different copy than the server. Ids are time-ordered, so "oldest pending request" and
   "events after cursor" are a sorted directory listing.
 - `src/lib/server/bridge/` holds the store and the operations; `src/app/api/bridge/` holds the routes;
   `scripts/motion-bridge.mjs` is the CLI; `.claude/skills/motion-studio/SKILL.md` teaches Claude the
@@ -54,6 +60,42 @@ and starts `wait` again.
 The editor sends to Claude Desktop by default. When `ANTHROPIC_API_KEY` is set, a "Use API key"
 checkbox switches the tab to `/api/ai/edit`.
 
+## Claude chat connector (MCP)
+
+The regular chat cannot run commands, so it talks to the bridge through an MCP server that Claude
+Desktop starts. Register it once, then quit Claude Desktop completely and open it again:
+
+```bash
+node scripts/motion-bridge.mjs install-chat
+```
+
+The command finds Claude Desktop's `claude_desktop_config.json`, including the Microsoft Store
+location under `%LOCALAPPDATA%\Claude-Data\`, backs it up, and adds a `motion-studio` entry that runs
+this repository's `scripts/motion-studio-mcp.mjs` with the current Node. `--config <file>` picks the
+file by hand.
+
+| Tool | What it does |
+|---|---|
+| `get_status` | server up, listener state, queued requests, open project |
+| `start_motion_studio` | runs `pnpm dev` in the repo if needed and opens the editor |
+| `get_authoring_guide` | the authoring contract (read once per conversation) |
+| `get_open_project` | the open project's entry file and text files |
+| `create_scene` | new layered scene → new project in the editor |
+| `edit_scene` | edit the open project: whole entry file, or one element with `layer_id` |
+| `wait_for_request` | next Ask Claude request from the editor; waits up to 45 s (0 = only queued) |
+| `answer_request` / `decline_request` | answer or decline a request |
+
+A chat cannot be woken from outside, so the editor-to-chat direction works in two ways:
+
+- **Listen:** "listen to Motion Studio" (or the connector's `listen` prompt). Claude keeps calling
+  `wait_for_request`; each call holds up to 45 s and returns the moment a request is sent. The editor
+  shows Claude as listening meanwhile. A long session may stop after many calls; say "continue".
+- **Check:** send from the editor, then say "check Motion Studio" (or the `check` prompt) in the chat.
+  Claude handles everything queued.
+
+The connector's `initialize` instructions and tool descriptions carry the workflow and the safety rule
+below, so no skill is needed in the chat.
+
 ## Routes
 
 | Route | Caller | Purpose |
@@ -73,8 +115,8 @@ checkbox switches the tab to `/api/ai/edit`.
 ## Security
 
 - The dev server listens on the local network too. Routes that read the project or act for Claude
-  require the `x-motion-bridge-token` header. The token is a random secret in the bridge folder, which
-  only processes of the same Windows / macOS / Linux user can read. The CLI reads it for you.
+  require the `x-motion-bridge-token` header. The token is a random secret in the bridge state folder,
+  inside the repository on this machine. The CLI and the connector read it for you.
 - Text typed into the Ask Claude tab reaches Claude as data. The skill limits what it may lead to:
   writing scene code and answering through `respond` or `fail`, nothing else.
 

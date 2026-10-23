@@ -51,6 +51,10 @@ Claude follows the `motion-studio` skill (`.claude/skills/motion-studio/SKILL.md
 `scripts/motion-bridge.mjs`. Answers pass the same validation as API replies. Design and routes:
 `docs/CLAUDE-DESKTOP.md`.
 
+The regular Claude chat in Claude Desktop works too, through an MCP connector. Run
+`node scripts/motion-bridge.mjs install-chat` once and restart Claude Desktop. Then ask the chat for a
+video, or say "listen to Motion Studio" / "check Motion Studio" to answer requests from the editor.
+
 ## How it works
 
 ```
@@ -103,7 +107,7 @@ export default function Scene() {
 | `CHROMIUM_PATH` | browser binary for export (auto-detected when empty) |
 | `FFMPEG_PATH` | ffmpeg binary (bundled `ffmpeg-static` when empty) |
 | `MOTION_STUDIO_JOBS_DIR` | where export jobs are written, default `$TMPDIR/motion-studio/jobs` |
-| `MOTION_STUDIO_BRIDGE_DIR` | Claude Desktop bridge state, default `$TMPDIR/motion-studio/bridge` |
+| `MOTION_STUDIO_BRIDGE_DIR` | Claude Desktop bridge state, default `.motion-bridge/state` in the repo |
 
 ## Scripts
 

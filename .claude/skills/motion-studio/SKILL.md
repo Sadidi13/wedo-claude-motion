@@ -13,7 +13,9 @@ command from the repository root (the folder holding `package.json` and `scripts
 node scripts/motion-bridge.mjs <status|contract|project|wait|respond|fail|new|edit> ...
 ```
 
-Scratch files go in `.motion-bridge/` (git-ignored). Details: `docs/CLAUDE-DESKTOP.md`.
+Scratch files go in `.motion-bridge/` (git-ignored). Details: `docs/CLAUDE-DESKTOP.md`. This skill is
+for Code sessions; the regular Claude chat uses the MCP connector `scripts/motion-studio-mcp.mjs`
+(`node scripts/motion-bridge.mjs install-chat` registers it in Claude Desktop).
 
 ## 0. Make sure the editor is running
 

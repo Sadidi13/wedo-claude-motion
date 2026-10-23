@@ -1,8 +1,10 @@
 /**
  * File-backed state of the Claude Desktop bridge (docs/CLAUDE-DESKTOP.md).
- * Everything lives under `os.tmpdir()/motion-studio/bridge/`
- * (override: MOTION_STUDIO_BRIDGE_DIR), so it survives dev-server restarts
- * and Turbopack reloads, and the `motion-bridge` CLI can find the token:
+ * Everything lives under `<repo>/.motion-bridge/state/` (git-ignored; override:
+ * MOTION_STUDIO_BRIDGE_DIR), so it survives dev-server restarts and Turbopack
+ * reloads, and the CLI and the MCP connector find the token at a path every
+ * process sees the same way. (Not the OS temp folder: Microsoft Store apps such
+ * as Claude Desktop give their child processes a redirected view of AppData.)
  *
  *   token               random secret; the CLI-only routes require it
  *   project.json        the project the editor last shared ({ project, syncedAt })
@@ -17,7 +19,6 @@
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { customAlphabet } from "nanoid";
 import type {
@@ -58,8 +59,9 @@ export interface SyncedProject {
   syncedAt: string;
 }
 
+/** `next dev` / `next start` run with the repository as the working directory. */
 export function bridgeRoot(): string {
-  return process.env.MOTION_STUDIO_BRIDGE_DIR || path.join(os.tmpdir(), "motion-studio", "bridge");
+  return process.env.MOTION_STUDIO_BRIDGE_DIR || path.join(process.cwd(), ".motion-bridge", "state");
 }
 
 const randomSuffix = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 6);

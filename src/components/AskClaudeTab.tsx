@@ -83,7 +83,7 @@ function waitingText(status: BridgeStatus | null, recentlyActive: boolean): stri
   if (status?.listener === "listening") return "Sent to Claude Desktop…";
   if (status?.listener === "busy") return "Claude Desktop is working on it…";
   if (recentlyActive) return "Queued. Claude Desktop will pick it up as soon as it finishes the previous request.";
-  return "Queued. Claude Desktop is not listening yet; it will pick this up when it does.";
+  return "Queued. Nobody is listening yet: in the Claude chat say “check Motion Studio”, or “listen to Motion Studio”.";
 }
 
 export function AskClaudeTab() {
@@ -265,8 +265,9 @@ export function AskClaudeTab() {
       <div className="flex shrink-0 flex-col gap-2 border-t border-border px-3 py-2">
         {transport === "desktop" && bridgeStatus !== null && !desktopConnected && !recentlyActive && !bridgeUnreachable && (
           <p dir="auto" className="rounded border border-accent-2/40 bg-accent-2/10 px-2 py-1 text-[11px] leading-[1.45] text-accent-2">
-            Claude Desktop is not listening. In the Claude app, open this project and say{" "}
-            <span className="font-medium">“listen to Motion Studio”</span>. Requests you send now wait in the queue.
+            Claude is not listening. In the Claude app say <span className="font-medium">“listen to Motion Studio”</span>, in a chat
+            with the Motion Studio connector or a Code session in this project. Requests you send now wait in the queue; in a
+            chat you can also say <span className="font-medium">“check Motion Studio”</span> after sending.
           </p>
         )}
         {transport === "desktop" && bridgeUnreachable && (

@@ -47,8 +47,39 @@ function tryParse(source: string | undefined): ParsedScene | null {
   }
 }
 
+/** Who answers: a Claude Code session with the CLI, or the Claude chat through the MCP connector. */
+export type BriefClient = "cli" | "mcp";
+
+function deliveryLines(id: string, client: BriefClient): string[] {
+  if (client === "mcp") {
+    return [
+      'Answer with the `answer_request` tool: `request_id` "' +
+        id +
+        "\", `summary` (one short paragraph, in the instruction's language) and `code`.",
+      "The rules for `code` are in the authoring guide (`get_authoring_guide`), section \"Output format\".",
+      "If the instruction is not a change to this animation, use `decline_request` with a short reason instead.",
+      "",
+    ];
+  }
+  return [
+    "Answer by writing the code to a file and running:",
+    "",
+    "```bash",
+    `node scripts/motion-bridge.mjs respond ${id} --summary "<one short paragraph, in the instruction's language>" --code <file>`,
+    "```",
+    "",
+    'The rules for `code` are in the contract (`node scripts/motion-bridge.mjs contract`), section "Output format".',
+    "If the instruction is not a change to this animation, decline it instead:",
+    "",
+    "```bash",
+    `node scripts/motion-bridge.mjs fail ${id} "<short reason>"`,
+    "```",
+    "",
+  ];
+}
+
 /** Markdown brief of one editor request for the Claude session that answers it. */
-export function buildBrief(record: BridgeRequestRecord): string {
+export function buildBrief(record: BridgeRequestRecord, client: BriefClient = "cli"): string {
   const req = record.request;
   const scene = tryParse(req.project.files[req.project.entry]?.content);
   const messages = buildMessages(req, scene);
@@ -69,19 +100,7 @@ export function buildBrief(record: BridgeRequestRecord): string {
     `- Project: "${req.project.name}" (${req.project.id})`,
     `- Received: ${record.createdAt}`,
     "",
-    "Answer by writing the code to a file and running:",
-    "",
-    "```bash",
-    `node scripts/motion-bridge.mjs respond ${record.id} --summary "<one short paragraph, in the instruction's language>" --code <file>`,
-    "```",
-    "",
-    'The rules for `code` are in the contract (`node scripts/motion-bridge.mjs contract`), section "Output format".',
-    "If the instruction is not a change to this animation, decline it instead:",
-    "",
-    "```bash",
-    `node scripts/motion-bridge.mjs fail ${record.id} "<short reason>"`,
-    "```",
-    "",
+    ...deliveryLines(record.id, client),
   ];
   if (history.length > 0) {
     parts.push("## Earlier turns on this layer / scene", "");
