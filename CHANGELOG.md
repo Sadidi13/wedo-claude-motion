@@ -8,6 +8,12 @@ All notable changes to WeDo Claude Motion. The format follows
 
 First public release, under the MIT license.
 
+### Install
+- One-line Windows installer (`scripts/install-windows.ps1`): installs Node.js and pnpm when missing,
+  downloads the app, adds desktop shortcuts and offers to connect the Claude app.
+- `INSTALL.md` with steps Claude Code follows when asked to install the app.
+- `scripts/start.cmd` and `pnpm bridge start` start the app and open the editor.
+
 ### Editor
 - Import Claude Design project archives, standalone HTML and JSX scenes; every element becomes a layer.
 - Layers panel, timeline with draggable Sprite bars, properties, code view, undo and redo.

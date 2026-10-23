@@ -3,17 +3,19 @@
 #   irm https://raw.githubusercontent.com/Sadidi13/wedo-claude-motion/main/scripts/install-windows.ps1 | iex
 #
 # It installs Node.js (with winget) and pnpm when they are missing, downloads the app to
-# %USERPROFILE%\wedo-claude-motion, installs its packages, adds desktop shortcuts and starts it.
+# %USERPROFILE%\wedo-claude-motion, installs its packages, adds desktop shortcuts, offers to connect
+# the Claude app (only when someone is at the keyboard to answer) and starts it.
 # Run the same line again to update; your settings (.env.local) and projects are kept.
 #
-# Options (environment variables, mainly for testing): WEDO_INSTALL_DIR, WEDO_NO_SHORTCUTS=1, WEDO_NO_START=1.
+# Options (environment variables, mainly for testing): WEDO_INSTALL_DIR, WEDO_NO_SHORTCUTS=1,
+# WEDO_NO_CONNECT=1, WEDO_NO_START=1.
 
 $ErrorActionPreference = "Stop"
 $Repo = "Sadidi13/wedo-claude-motion"
 $Branch = "main"
 $InstallDir = if ($env:WEDO_INSTALL_DIR) { $env:WEDO_INSTALL_DIR } else { Join-Path $HOME "wedo-claude-motion" }
 
-function Step([string]$number, [string]$text) { Write-Host ""; Write-Host "[$number/5] $text" -ForegroundColor Cyan }
+function Step([string]$number, [string]$text) { Write-Host ""; Write-Host "[$number/6] $text" -ForegroundColor Cyan }
 function Info([string]$text) { Write-Host "      $text" }
 function Fail([string]$text) { Write-Host ""; Write-Host "  $text" -ForegroundColor Red; throw "WeDo Claude Motion was not installed." }
 function Has([string]$command) { [bool](Get-Command $command -ErrorAction SilentlyContinue) }
@@ -25,6 +27,29 @@ function Node-Major {
   if (-not (Has "node")) { return 0 }
   $version = (& node -v) -replace "^v", ""
   return [int]($version.Split(".")[0])
+}
+# The Claude app's config files (Store build, installer build); see findClaudeDesktopConfigs in scripts\motion-bridge.mjs.
+function Claude-Configs {
+  $patterns = @(
+    (Join-Path $env:LOCALAPPDATA "Claude-Data\claude*\claude_desktop_config.json"),
+    (Join-Path $env:LOCALAPPDATA "Packages\Claude*\LocalCache\Roaming\Claude\claude_desktop_config.json"),
+    (Join-Path $env:APPDATA "Claude\claude_desktop_config.json")
+  )
+  return @(Get-ChildItem -Path $patterns -ErrorAction SilentlyContinue)
+}
+function Claude-Installed {
+  if ((Claude-Configs).Count -gt 0) { return $true }
+  if (-not (Has "Get-StartApps")) { return $false }
+  return [bool](Get-StartApps -ErrorAction SilentlyContinue | Where-Object Name -eq "Claude")
+}
+function Claude-Connected {
+  # JSON escapes backslashes, so the connector's path appears with doubled ones.
+  $connector = (Join-Path $InstallDir "scripts\motion-studio-mcp.mjs").Replace("\", "\\")
+  foreach ($file in (Claude-Configs)) {
+    $text = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction SilentlyContinue
+    if ($text -and $text.Contains($connector)) { return $true }
+  }
+  return $false
 }
 
 Write-Host ""
@@ -111,12 +136,35 @@ if ($env:WEDO_NO_SHORTCUTS -ne "1") {
   Info "Skipped (WEDO_NO_SHORTCUTS=1)."
 }
 
+# 6. The Claude app: asked only when someone can answer (not when Claude Code runs this installer).
+Step 6 "Claude app"
+$connectScript = Join-Path $InstallDir "scripts\connect-claude-chat.cmd"
+$interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+if ($env:WEDO_NO_CONNECT -eq "1") {
+  Info "Skipped (WEDO_NO_CONNECT=1)."
+} elseif (Claude-Connected) {
+  Info "Already connected: ask for a video in the Claude chat or the Code tab."
+} elseif (-not (Claude-Installed)) {
+  Info "The Claude app was not found. After installing it (https://claude.ai/download),"
+  Info "double-click $connectScript once to connect it."
+} elseif (-not $interactive) {
+  Info "To use the Claude chat, double-click $connectScript once."
+} else {
+  Info "Connecting lets you ask for videos in the Claude chat and in the Code tab, in any folder."
+  $answer = Read-Host "      Connect it now? You will be asked to quit Claude for a moment [Y/n]"
+  if ($answer -match "^\s*n") {
+    Info "Skipped. To connect later, double-click $connectScript"
+  } else {
+    & $connectScript --no-pause
+  }
+}
+
 Write-Host ""
 Write-Host "  WeDo Claude Motion is installed." -ForegroundColor Green
 Write-Host "  Start it any time with the 'WeDo Claude Motion' shortcut on your desktop."
-Write-Host "  To work with Claude, see 'Use it with Claude' in https://github.com/$Repo"
-if (-not (Has "claude")) {
-  Write-Host "  The autopilot needs Claude Code:  npm install -g @anthropic-ai/claude-code"
+Write-Host "  How to use it with Claude: https://github.com/$Repo#use-it-with-claude"
+if (-not (Has "claude") -and -not (Test-Path (Join-Path $HOME ".local\bin\claude.exe"))) {
+  Write-Host "  The optional autopilot needs Claude Code:  irm https://claude.ai/install.ps1 | iex"
 }
 
 if ($env:WEDO_NO_START -ne "1") {

@@ -2,6 +2,7 @@
 rem Registers the Motion Studio connector in Claude Desktop (docs/CLAUDE-DESKTOP.md).
 rem Claude Desktop rewrites its config while it runs, so this waits until it is closed,
 rem registers the connector, starts Motion Studio if needed and opens Claude again.
+rem --no-pause skips the closing countdown (the Windows installer uses it).
 setlocal
 title Connect the Claude chat to Motion Studio
 cd /d "%~dp0.."
@@ -41,6 +42,7 @@ if errorlevel 1 echo   Could not find Claude in the Start menu. Open it yourself
 
 echo.
 echo   Done. In a new Claude chat, ask for a video, or say "listen to Motion Studio".
+if /i "%~1"=="--no-pause" exit /b 0
 echo   This window closes in 20 seconds.
 timeout /t 20 >nul
 exit /b 0
