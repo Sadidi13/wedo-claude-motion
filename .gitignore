@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Claude Desktop bridge scratch files (briefs, drafts, fetched project)
+/.motion-bridge/

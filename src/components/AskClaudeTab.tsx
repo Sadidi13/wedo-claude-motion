@@ -1,15 +1,25 @@
 "use client";
 /**
  * Ask Claude tab: scope (selected layer / whole scene / new scene), prompt
- * (RTL auto-detected), POST /api/ai/edit, and a per-layer chat thread kept in
- * the store. Each reply is applied immediately with history so "Undo" is one
- * click; server errors are shown verbatim in the thread.
+ * (RTL auto-detected) and a per-layer chat thread kept in the store.
+ *
+ * Two ways to reach Claude:
+ *   - Claude Desktop (default): the request is queued on /api/bridge/requests
+ *     and answered by a Claude session running `motion-bridge wait`
+ *     (docs/CLAUDE-DESKTOP.md). `useBridgeSync` polls it and applies the answer,
+ *     so the wait survives switching tabs.
+ *   - API key: POST /api/ai/edit, only offered when ANTHROPIC_API_KEY is set.
+ *
+ * Each reply is applied immediately with history so "Undo" is one click;
+ * errors are shown verbatim in the thread.
  */
-import { CircleAlert, Send, Sparkles, Trash2, Undo2 } from "lucide-react";
+import { CircleAlert, Send, Sparkles, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { createBlankProject } from "@/lib/importer";
-import type { AiEditRequest, AiEditResponse, AiErrorResponse, AiScope, Project, ProjectFile } from "@/lib/types";
+import type { AiEditRequest, AiEditResponse, AiErrorResponse, AiScope, BridgeStatus } from "@/lib/types";
+import { applyAiResult } from "@/store/aiApply";
+import { isDesktopConnected, useBridgeStore } from "@/store/bridgeStore";
 import { chatKeyFor, errorMessage, useEditorStore, type ChatEntry } from "@/store/editorStore";
 import { useAiStatus } from "./hooks/useAiStatus";
 import { Button } from "./ui/Button";
@@ -24,37 +34,10 @@ const SCOPES: SegmentedOption<AiScope>[] = [
   { value: "new", label: "New scene", title: "Generate a fresh project from the prompt" },
 ];
 
+type Transport = "desktop" | "api";
+
 function isAiResponse(value: unknown): value is AiEditResponse | AiErrorResponse {
   return typeof value === "object" && value !== null && typeof (value as { ok?: unknown }).ok === "boolean";
-}
-
-function fileKind(path: string): ProjectFile["kind"] {
-  const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
-  return ext === "jsx" || ext === "js" || ext === "tsx" || ext === "ts" || ext === "css" || ext === "html" || ext === "json" ? ext : "asset";
-}
-
-/** Apply a successful response to the store; throws when the code does not parse. */
-function applyResponse(response: AiEditResponse, scope: AiScope, layerId: string | null): void {
-  const store = useEditorStore.getState();
-  const extraFiles = response.files ?? [];
-  if (scope === "layer") {
-    if (!layerId || !response.layerCode) throw new Error("The reply did not contain layer code");
-    store.replaceLayer(layerId, response.layerCode);
-    for (const file of extraFiles) store.updateFile(file.path, file.content);
-    return;
-  }
-  if (!response.sceneCode) throw new Error("The reply did not contain scene code");
-  if (scope === "scene") {
-    store.setSource(response.sceneCode);
-    for (const file of extraFiles) store.updateFile(file.path, file.content);
-    return;
-  }
-  const blank = createBlankProject(store.scene?.meta, "Generated scene");
-  const files: Record<string, ProjectFile> = { ...blank.files };
-  for (const file of extraFiles) files[file.path] = { path: file.path, kind: fileKind(file.path), content: file.content };
-  files[blank.entry] = { path: blank.entry, kind: "jsx", content: response.sceneCode };
-  const project: Project = { ...blank, files, origin: "ai-generate" };
-  store.loadProject(project);
 }
 
 function Turn({ entry, latest, canUndo }: { entry: ChatEntry; latest: boolean; canUndo: boolean }) {
@@ -96,8 +79,18 @@ function Turn({ entry, latest, canUndo }: { entry: ChatEntry; latest: boolean; c
   );
 }
 
+function waitingText(status: BridgeStatus | null, recentlyActive: boolean): string {
+  if (status?.listener === "listening") return "Sent to Claude Desktop…";
+  if (status?.listener === "busy") return "Claude Desktop is working on it…";
+  if (recentlyActive) return "Queued. Claude Desktop will pick it up as soon as it finishes the previous request.";
+  return "Queued. Claude Desktop is not listening yet; it will pick this up when it does.";
+}
+
 export function AskClaudeTab() {
   const status = useAiStatus();
+  const { bridgeStatus, bridgeUnreachable, recentlyActive, pending } = useBridgeStore(
+    useShallow((s) => ({ bridgeStatus: s.status, bridgeUnreachable: s.unreachable, recentlyActive: s.recentlyActive, pending: s.pending })),
+  );
   const { selectedId, selectedName, chat, canUndo, hasScene, project } = useEditorStore(
     useShallow((s) => ({
       selectedId: s.selectedId,
@@ -111,21 +104,48 @@ export function AskClaudeTab() {
   const [scope, setScope] = useState<AiScope>("layer");
   const [prompt, setPrompt] = useState("");
   const [includeFrame, setIncludeFrame] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [preferApi, setPreferApi] = useState(false);
+  const [apiBusy, setApiBusy] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+
+  const apiReady = status.state === "ready";
+  const transport: Transport = apiReady && preferApi ? "api" : "desktop";
+  const busy = apiBusy || pending !== null;
 
   const effectiveScope: AiScope = scope === "layer" && !selectedId ? "scene" : scope;
   const key = chatKeyFor(effectiveScope, selectedId);
   const thread = chat[key] ?? [];
   const lastAssistant = [...thread].reverse().find((t) => t.role === "assistant" && t.status === "applied");
+  const pendingHere = pending !== null && (pending.key === key || pending.scope === "new");
 
   useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [thread.length, key]);
+  }, [thread.length, key, pendingHere]);
 
-  const configured = status.state === "ready";
-  const canSend = configured && !busy && prompt.trim().length > 0 && project !== null && (effectiveScope === "new" || hasScene);
+  const canSend = !busy && prompt.trim().length > 0 && project !== null && (effectiveScope === "new" || hasScene);
+
+  const sendViaApi = async (request: AiEditRequest): Promise<AiEditResponse | AiErrorResponse> => {
+    const response = await fetch("/api/ai/edit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    const body: unknown = await response.json().catch(() => null);
+    if (!isAiResponse(body)) throw new Error(`Unexpected response (HTTP ${response.status})`);
+    return body;
+  };
+
+  const queueForDesktop = async (request: AiEditRequest): Promise<string> => {
+    const response = await fetch("/api/bridge/requests", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    const body = (await response.json().catch(() => null)) as { id?: string; error?: string } | null;
+    if (!response.ok || !body?.id) throw new Error(body?.error ?? `Could not queue the request (HTTP ${response.status})`);
+    return body.id;
+  };
 
   const send = async () => {
     if (!canSend || !project) return;
@@ -141,40 +161,40 @@ export function AskClaudeTab() {
       layerId: layerId ?? undefined,
       history: history.length ? history : undefined,
     };
+    const ctx = { scope: effectiveScope, layerId, key, prompt: text };
     if (effectiveScope !== "new") store.appendChat(key, { role: "user", content: text });
-    setBusy(true);
     setPrompt("");
-    try {
-      const response = await fetch("/api/ai/edit", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(request),
-      });
-      const body: unknown = await response.json().catch(() => null);
-      if (!isAiResponse(body)) throw new Error(`Unexpected response (HTTP ${response.status})`);
-      const latest = useEditorStore.getState();
-      if (!body.ok) {
-        latest.appendChat(key, { role: "assistant", content: `${body.error} (${body.code})`, status: "error" });
-        return;
-      }
+
+    if (transport === "desktop") {
       try {
-        applyResponse(body, effectiveScope, layerId);
-      } catch (applyError) {
-        useEditorStore.getState().appendChat(key, {
-          role: "assistant",
-          content: `${body.summary}\n\nCould not apply the change: ${errorMessage(applyError)}`,
-          status: "error",
-        });
-        return;
+        const id = await queueForDesktop(request);
+        useBridgeStore.getState().setPending({ id, ...ctx, sentAt: Date.now() });
+      } catch (error) {
+        useEditorStore.getState().appendChat(key, { role: "assistant", content: errorMessage(error), status: "error" });
       }
-      const after = useEditorStore.getState();
-      if (effectiveScope === "new") after.appendChat("scene", { role: "user", content: text });
-      after.appendChat(effectiveScope === "new" ? "scene" : key, { role: "assistant", content: body.summary, status: "applied" });
+      return;
+    }
+
+    setApiBusy(true);
+    try {
+      applyAiResult(await sendViaApi(request), ctx);
     } catch (error) {
       useEditorStore.getState().appendChat(key, { role: "assistant", content: errorMessage(error), status: "error" });
     } finally {
-      setBusy(false);
+      setApiBusy(false);
     }
+  };
+
+  const cancelPending = async () => {
+    const current = useBridgeStore.getState().pending;
+    if (!current) return;
+    useBridgeStore.getState().setPending(null);
+    await fetch(`/api/bridge/requests/${encodeURIComponent(current.id)}`, { method: "DELETE" }).catch(() => undefined);
+    useEditorStore.getState().appendChat(current.scope === "new" ? "scene" : current.key, {
+      role: "assistant",
+      content: "Cancelled.",
+      status: "error",
+    });
   };
 
   const onPromptKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -183,6 +203,8 @@ export function AskClaudeTab() {
       void send();
     }
   };
+
+  const desktopConnected = isDesktopConnected(bridgeStatus);
 
   return (
     <>
@@ -194,16 +216,20 @@ export function AskClaudeTab() {
           onChange={setScope}
           options={SCOPES.map((option) => (option.value === "layer" ? { ...option, disabled: !selectedId } : option))}
         />
-        <div className="flex items-center justify-between text-[11px] text-muted">
+        <div className="flex items-center justify-between gap-2 text-[11px] text-muted">
           <span className="truncate">
             {effectiveScope === "layer" && selectedName ? `Editing “${selectedName}”` : effectiveScope === "scene" ? "Editing the whole scene" : "Generating a new project"}
           </span>
-          <StatusPill status={status} />
+          {transport === "desktop" ? (
+            <DesktopPill status={bridgeStatus} unreachable={bridgeUnreachable} recentlyActive={recentlyActive} />
+          ) : (
+            <ApiPill status={status} />
+          )}
         </div>
       </div>
 
       <div ref={listRef} className="ms-scroll flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto px-3 py-3">
-        {thread.length === 0 && (
+        {thread.length === 0 && !pendingHere && (
           <p className="text-[11.5px] text-muted">
             <Sparkles size={12} className="mr-1 inline text-accent" />
             Describe the change in English or Persian. Claude rewrites {effectiveScope === "layer" ? "only this layer" : "the scene"} and you can undo it.
@@ -212,20 +238,43 @@ export function AskClaudeTab() {
         {thread.map((entry) => (
           <Turn key={entry.id} entry={entry} latest={entry.id === lastAssistant?.id} canUndo={canUndo} />
         ))}
-        {busy && (
+        {apiBusy && (
           <div className="flex items-center gap-2 text-[11.5px] text-muted">
             <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> Claude is working…
+          </div>
+        )}
+        {pending && (
+          <div className="flex items-start gap-2 text-[11.5px] text-muted">
+            <span className="mt-1 h-2 w-2 shrink-0 animate-pulse rounded-full bg-accent" />
+            <span className="flex-1">
+              {waitingText(bridgeStatus, recentlyActive)}
+              {!pendingHere && " (for another layer)"}
+            </span>
+            <button
+              type="button"
+              onClick={() => void cancelPending()}
+              className="ms-focus inline-flex shrink-0 items-center gap-0.5 rounded px-1 text-accent hover:bg-panel-3"
+              title="Cancel this request"
+            >
+              <X size={11} /> Cancel
+            </button>
           </div>
         )}
       </div>
 
       <div className="flex shrink-0 flex-col gap-2 border-t border-border px-3 py-2">
-        {status.state === "unconfigured" && (
-          <p className="rounded border border-accent-2/40 bg-accent-2/10 px-2 py-1 text-[11px] text-accent-2">
-            Set <code className="font-mono">ANTHROPIC_API_KEY</code> in <code className="font-mono">.env.local</code> and restart the dev server to enable Claude.
+        {transport === "desktop" && bridgeStatus !== null && !desktopConnected && !recentlyActive && !bridgeUnreachable && (
+          <p dir="auto" className="rounded border border-accent-2/40 bg-accent-2/10 px-2 py-1 text-[11px] leading-[1.45] text-accent-2">
+            Claude Desktop is not listening. In the Claude app, open this project and say{" "}
+            <span className="font-medium">“listen to Motion Studio”</span>. Requests you send now wait in the queue.
           </p>
         )}
-        {status.state === "error" && <p className="text-[11px] text-danger">Could not reach /api/ai/status: {status.message}</p>}
+        {transport === "desktop" && bridgeUnreachable && (
+          <p className="text-[11px] text-danger">Could not reach /api/bridge/status. Is the dev server running?</p>
+        )}
+        {status.state === "error" && transport === "api" && (
+          <p className="text-[11px] text-danger">Could not reach /api/ai/status: {status.message}</p>
+        )}
         <textarea
           dir="auto"
           rows={3}
@@ -237,13 +286,17 @@ export function AskClaudeTab() {
           aria-label="Prompt for Claude"
         />
         <div className="flex items-center gap-2">
-          <Checkbox
-            label="Include current frame"
-            checked={includeFrame}
-            onChange={setIncludeFrame}
-            disabled
-            title="Not available yet: the preview cannot capture a screenshot in v1"
-          />
+          {apiReady ? (
+            <Checkbox label="Use API key" checked={preferApi} onChange={setPreferApi} title="Send to the Anthropic API instead of Claude Desktop" />
+          ) : (
+            <Checkbox
+              label="Include current frame"
+              checked={includeFrame}
+              onChange={setIncludeFrame}
+              disabled
+              title="Not available yet: the preview cannot capture a screenshot in v1"
+            />
+          )}
           <div className="flex-1" />
           {thread.length > 0 && (
             <IconButton title="Clear this thread" onClick={() => useEditorStore.getState().clearChat(key)}>
@@ -259,7 +312,36 @@ export function AskClaudeTab() {
   );
 }
 
-function StatusPill({ status }: { status: ReturnType<typeof useAiStatus> }) {
+function DesktopPill({ status, unreachable, recentlyActive }: { status: BridgeStatus | null; unreachable: boolean; recentlyActive: boolean }) {
+  if (unreachable) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 text-danger">
+        <span className="h-1.5 w-1.5 rounded-full bg-danger" /> server offline
+      </span>
+    );
+  }
+  if (!status) return <span className="shrink-0 text-muted">checking…</span>;
+  const idle = status.listener === "offline" && recentlyActive;
+  const label =
+    status.listener === "listening"
+      ? "Claude Desktop"
+      : status.listener === "busy"
+        ? "Claude Desktop · busy"
+        : idle
+          ? "Claude Desktop · between requests"
+          : "Claude Desktop · offline";
+  const dot = status.listener === "busy" || idle ? "bg-accent-2" : status.listener === "offline" ? "bg-muted" : "bg-success";
+  return (
+    <span
+      className={cx("inline-flex shrink-0 items-center gap-1 text-[10.5px]", status.listener === "offline" ? "text-muted" : "text-foreground")}
+      title={status.pending ? `${status.pending} request(s) waiting` : undefined}
+    >
+      <span className={cx("h-1.5 w-1.5 rounded-full", dot)} /> {label}
+    </span>
+  );
+}
+
+function ApiPill({ status }: { status: ReturnType<typeof useAiStatus> }) {
   if (status.state === "loading") return <span className="text-muted">checking…</span>;
   if (status.state === "ready") {
     return (

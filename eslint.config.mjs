@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Claude Desktop bridge scratch files (briefs, drafts, fetched projects).
+    ".motion-bridge/**",
   ]),
 ]);
 

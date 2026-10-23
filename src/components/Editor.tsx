@@ -9,6 +9,7 @@ import { useCallback, useState, type PointerEvent as ReactPointerEvent } from "r
 import { Canvas } from "./Canvas";
 import { ExportDialog } from "./ExportDialog";
 import { useBootstrap } from "./hooks/useBootstrap";
+import { useBridgeSync } from "./hooks/useBridgeSync";
 import { useEditorHotkeys } from "./hooks/useEditorHotkeys";
 import { ImportDialog } from "./ImportDialog";
 import { Inspector, type InspectorTab } from "./Inspector";
@@ -28,6 +29,7 @@ type Dialog = "import" | "export" | null;
 export default function Editor() {
   useBootstrap();
   useEditorHotkeys();
+  useBridgeSync();
 
   const [timelineHeight, setTimelineHeight] = useState(TIMELINE_DEFAULT);
   const [tab, setTab] = useState<InspectorTab>("properties");

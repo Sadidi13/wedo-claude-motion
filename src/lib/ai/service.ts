@@ -166,6 +166,43 @@ function prepare(request: AiEditRequest): Prepared {
   return { ok: true, entrySource: entry.content, scene };
 }
 
+/** Successful edit response from validated output (shared by the API path and the Claude Desktop bridge). */
+function successResponse(
+  scope: AiScope,
+  summary: string,
+  validation: { layerCode?: string; sceneCode?: string; files?: { path: string; content: string }[] },
+  usage?: Usage,
+): AiEditResponse {
+  return {
+    ok: true,
+    scope,
+    summary: summary.trim(),
+    ...(validation.layerCode !== undefined ? { layerCode: validation.layerCode } : {}),
+    ...(validation.sceneCode !== undefined ? { sceneCode: validation.sceneCode } : {}),
+    ...(validation.files ? { files: validation.files } : {}),
+    ...(usage ? { usage } : {}),
+  };
+}
+
+/**
+ * Turn output written somewhere other than the API call (the Claude Desktop
+ * bridge) into the same `AiEditResponse` the API path produces: the request is
+ * checked like `edit` does, then the output goes through `validateAiOutput`.
+ * Validation failures come back as `invalid_output` with the plain-English error.
+ */
+export function finalizeOutput(request: AiEditRequest, output: AiOutput): AiEditResponse | AiErrorResponse {
+  const prepared = prepare(request);
+  if (!prepared.ok) return prepared.response;
+  const validation = validateAiOutput(output, {
+    scope: request.scope,
+    entryPath: request.project.entry,
+    entrySource: prepared.entrySource,
+    layerId: request.layerId,
+  });
+  if (!validation.ok) return fail("invalid_output", validation.error);
+  return successResponse(request.scope, output.summary, validation);
+}
+
 type Extracted = { ok: true; output: AiOutput; raw: string } | { ok: false; error: string; raw: string };
 
 /** Use the SDK-parsed output when present, otherwise parse the text blocks with the zod schema. */
@@ -268,15 +305,7 @@ export function createAiService(options: AiServiceOptions = {}): AiService {
       const extracted = extractOutput(turn.message, turn.parsed);
       const validation = extracted.ok ? validateAiOutput(extracted.output, ctx) : extracted;
       if (validation.ok && extracted.ok) {
-        return {
-          ok: true,
-          scope: request.scope,
-          summary: extracted.output.summary.trim(),
-          ...(validation.layerCode !== undefined ? { layerCode: validation.layerCode } : {}),
-          ...(validation.sceneCode !== undefined ? { sceneCode: validation.sceneCode } : {}),
-          ...(validation.files ? { files: validation.files } : {}),
-          usage,
-        };
+        return successResponse(request.scope, extracted.output.summary, validation, usage);
       }
       const error = validation.ok ? "unknown validation failure" : validation.error;
       if (attempt === 0) {

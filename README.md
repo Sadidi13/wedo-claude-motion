@@ -15,7 +15,7 @@ Persian product proposal: `docs/PROPOSAL.fa.md`. Module contracts: `docs/CONTRAC
 
 ```bash
 pnpm install
-cp .env.example .env.local        # add ANTHROPIC_API_KEY for the "Ask Claude" panel
+cp .env.example .env.local        # optional: ANTHROPIC_API_KEY, only if you do not use Claude Desktop
 pnpm dev                           # http://localhost:3000
 ```
 
@@ -36,6 +36,20 @@ Windows, macOS and Linux; `CHROMIUM_PATH` to override) and the ffmpeg binary bun
 | No Claude Motion access | Ask Claude panel → scope **New scene** → describe the animation | generated inside the app with your API key |
 
 MP4 files cannot be turned back into layers.
+
+## Working from Claude Desktop (no API key)
+
+A Claude subscription can drive the editor through the Claude desktop app (Code tab) or Claude Code,
+with no API key. Open this repository (or its parent folder) in a Claude session while `pnpm dev` runs:
+
+- **Chat to editor.** "Make a 6 s teaser for …" creates a layered scene that opens in the editor.
+  "Make the title bigger" edits the open project as one undo-able step.
+- **Editor to chat.** Say "listen to Motion Studio" in the chat once. From then on, the Ask Claude tab
+  sends its requests to that session, and the answers are applied in the editor.
+
+Claude follows the `motion-studio` skill (`.claude/skills/motion-studio/SKILL.md`) and drives
+`scripts/motion-bridge.mjs`. Answers pass the same validation as API replies. Design and routes:
+`docs/CLAUDE-DESKTOP.md`.
 
 ## How it works
 
@@ -84,11 +98,12 @@ export default function Scene() {
 
 | Variable | Purpose |
 |---|---|
-| `ANTHROPIC_API_KEY` | required for Ask Claude (server side only) |
+| `ANTHROPIC_API_KEY` | optional: Ask Claude through the API instead of Claude Desktop (server side only) |
 | `MOTION_STUDIO_MODEL` | model id, default `claude-opus-5-5` |
 | `CHROMIUM_PATH` | browser binary for export (auto-detected when empty) |
 | `FFMPEG_PATH` | ffmpeg binary (bundled `ffmpeg-static` when empty) |
 | `MOTION_STUDIO_JOBS_DIR` | where export jobs are written, default `$TMPDIR/motion-studio/jobs` |
+| `MOTION_STUDIO_BRIDGE_DIR` | Claude Desktop bridge state, default `$TMPDIR/motion-studio/bridge` |
 
 ## Scripts
 
@@ -99,6 +114,7 @@ pnpm start      # serve the build
 pnpm test       # vitest (parser, loader, importer, samples, store, AI service, export)
 pnpm typecheck  # tsc --noEmit
 pnpm lint       # eslint
+pnpm bridge     # Claude Desktop bridge CLI (status | contract | project | wait | respond | fail | new | edit)
 ```
 
 ## Keyboard

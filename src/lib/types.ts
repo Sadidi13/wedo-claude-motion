@@ -235,3 +235,53 @@ export interface ExportJobStatus {
   startedAt: string;
   finishedAt?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Claude Desktop bridge (server routes under /api/bridge) — see docs/CLAUDE-DESKTOP.md
+// ---------------------------------------------------------------------------
+
+/**
+ * "listening": a `motion-bridge wait` process polled within the last few seconds.
+ * "busy": nobody is polling, but a request is claimed (Claude is working on it).
+ * "offline": neither; new requests queue until Claude starts listening again.
+ */
+export type BridgeListenerState = "listening" | "busy" | "offline";
+
+export interface BridgeStatus {
+  listener: BridgeListenerState;
+  /** epoch ms of the last poll from the listener, or null when it never polled */
+  lastSeen: number | null;
+  /** requests waiting to be claimed */
+  pending: number;
+  /** the project the editor last shared with the server */
+  project: { id: string; name: string; syncedAt: string } | null;
+}
+
+export type BridgeRequestState = "pending" | "claimed" | "done" | "error" | "cancelled";
+
+/** What the editor sees when it polls one request (the request body itself is not echoed back). */
+export interface BridgeRequestView {
+  id: string;
+  state: BridgeRequestState;
+  createdAt: string;
+  claimedAt?: string;
+  finishedAt?: string;
+  /** set when state === "done": the validated edit, ready for the editor to apply */
+  result?: AiEditResponse;
+  /** set when state === "error" */
+  error?: string;
+}
+
+/** Changes Claude pushed from the desktop chat, delivered to the open editor in order. */
+export type BridgeEvent =
+  | { id: string; at: string; type: "project"; project: Project; summary: string }
+  | {
+      id: string;
+      at: string;
+      type: "edit";
+      /** the project the edit was made against; the editor ignores it for any other project */
+      projectId: string;
+      prompt: string;
+      layerId?: string;
+      response: AiEditResponse;
+    };

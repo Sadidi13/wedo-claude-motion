@@ -33,7 +33,7 @@ const StageMetaSchema = z.object({
   background: z.string().optional(),
 });
 
-const ProjectSchema = z.object({
+export const ProjectSchema = z.object({
   id: z.string().min(1),
   name: z.string(),
   entry: z.string().min(1),
