@@ -8,7 +8,7 @@
  *
  *   token               random secret; the CLI-only routes require it
  *   project.json        the project the editor last shared ({ project, syncedAt })
- *   listener.json       { lastSeen } — heartbeat of `motion-bridge wait`
+ *   listener.json       { lastSeen, client } — heartbeat of whoever claims requests
  *   requests/<id>.json  one Ask Claude request from the editor and its outcome
  *   events/<id>.json    scenes / edits Claude pushed from the desktop chat
  *
@@ -24,6 +24,7 @@ import { customAlphabet } from "nanoid";
 import type {
   AiEditRequest,
   AiEditResponse,
+  BridgeClient,
   BridgeEvent,
   BridgeRequestState,
   BridgeRequestView,
@@ -222,14 +223,14 @@ export function readRequest(id: string): Promise<BridgeRequestRecord | null> {
   return readJson<BridgeRequestRecord>(requestFile(id));
 }
 
-export async function touchListener(now = Date.now()): Promise<void> {
-  await writeJsonAtomic(path.join(bridgeRoot(), "listener.json"), { lastSeen: now });
+export async function touchListener(now = Date.now(), client: BridgeClient = "cli"): Promise<void> {
+  await writeJsonAtomic(path.join(bridgeRoot(), "listener.json"), { lastSeen: now, client });
 }
 
 /** Heartbeat + claim the oldest pending request (null when there is none). */
-export function claimNextRequest(now = new Date()): Promise<BridgeRequestRecord | null> {
+export function claimNextRequest(now = new Date(), client: BridgeClient = "cli"): Promise<BridgeRequestRecord | null> {
   return serial(async () => {
-    await touchListener(now.getTime());
+    await touchListener(now.getTime(), client);
     for (const id of await listIds(requestsDir())) {
       const record = await readJson<BridgeRequestRecord>(requestFile(id));
       if (record?.state !== "pending") continue;
@@ -281,7 +282,7 @@ export function finishRequest(id: string, outcome: RequestOutcome, now = new Dat
 
 export async function bridgeStatus(now = Date.now()): Promise<BridgeStatus> {
   const [listener, synced, ids] = await Promise.all([
-    readJson<{ lastSeen: number }>(path.join(bridgeRoot(), "listener.json")),
+    readJson<{ lastSeen: number; client?: BridgeClient }>(path.join(bridgeRoot(), "listener.json")),
     readSyncedProject(),
     listIds(requestsDir()),
   ]);
@@ -299,6 +300,7 @@ export async function bridgeStatus(now = Date.now()): Promise<BridgeStatus> {
   return {
     listener: listening ? "listening" : claimed ? "busy" : "offline",
     lastSeen,
+    listenerClient: listener ? (listener.client ?? "cli") : null,
     pending,
     project: synced ? { id: synced.project.id, name: synced.project.name, syncedAt: synced.syncedAt } : null,
   };

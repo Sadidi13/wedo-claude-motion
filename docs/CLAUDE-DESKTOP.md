@@ -52,10 +52,36 @@ and starts `wait` again.
 
 | Editor shows | Meaning |
 |---|---|
-| Claude Desktop | a `wait` polled in the last 5 s |
-| Claude Desktop · busy | nobody polls, but a request is claimed |
-| Claude Desktop · between requests | a `wait` polled in the last 90 s; Claude is answering and re-arms next |
-| Claude Desktop · offline | nothing for longer; requests queue until Claude listens again |
+| Autopilot / Claude Desktop | the autopilot or a Claude session polled in the last 5 s |
+| … · busy | nobody polls, but a request is claimed |
+| … · between requests | polled in the last 90 s; the answer is being written, polling resumes next |
+| Claude · offline | nothing for longer; requests queue until something listens again |
+
+The heartbeat records who polled (`listenerClient`: `cli`, `mcp` or `headless`), which is how the
+editor names the autopilot. Run only one listener at a time: whichever polls first claims a request.
+
+## Autopilot (recommended for the Ask Claude tab)
+
+`scripts/motion-autopilot.mjs` answers editor requests with no Claude session open. It polls the
+bridge like `wait` does, which talks only to the local server and costs no Claude usage. When a request
+arrives it runs Claude Code once in print mode with the user's own Claude login:
+
+```bash
+claude -p --output-format json --system-prompt-file <authoring guide> --tools "" --strict-mcp-config --no-session-persistence
+```
+
+The brief (`?client=headless`) asks for a bare JSON object; the reply goes through the same validation,
+with one retry carrying the error, and is declined with the reason if it still fails. Claude Code runs
+with no tools, no MCP servers and no `CLAUDE*` environment variables, in an empty working folder, so a
+request can only ever produce scene code. Each request is a short, independent run: no conversation
+grows over time.
+
+- **Windows:** double-click `scripts/start-autopilot.cmd`. It starts Motion Studio in its own window if
+  needed, runs the autopilot, and the first time opens Claude Code's sign-in
+  (`claude auth login --claudeai`) in the browser.
+- **Anywhere:** `pnpm autopilot` (`--model sonnet` or `MOTION_STUDIO_AUTOPILOT_MODEL` to pick a model,
+  `MOTION_STUDIO_CLAUDE_BIN` for a Claude Code binary that is not on PATH). Exit code 2 means Claude Code
+  is not signed in.
 
 The editor sends to Claude Desktop by default. When `ANTHROPIC_API_KEY` is set, a "Use API key"
 checkbox switches the tab to `/api/ai/edit`.

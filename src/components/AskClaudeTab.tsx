@@ -79,11 +79,17 @@ function Turn({ entry, latest, canUndo }: { entry: ChatEntry; latest: boolean; c
   );
 }
 
+/** "Autopilot" when scripts/motion-autopilot.mjs is the listener, otherwise a Claude session. */
+function listenerName(status: BridgeStatus | null): string {
+  return status?.listenerClient === "headless" ? "Autopilot" : "Claude Desktop";
+}
+
 function waitingText(status: BridgeStatus | null, recentlyActive: boolean): string {
-  if (status?.listener === "listening") return "Sent to Claude Desktop…";
-  if (status?.listener === "busy") return "Claude Desktop is working on it…";
-  if (recentlyActive) return "Queued. Claude Desktop will pick it up as soon as it finishes the previous request.";
-  return "Queued. Nobody is listening yet: in the Claude chat say “check Motion Studio”, or “listen to Motion Studio”.";
+  const who = listenerName(status);
+  if (status?.listener === "listening") return `Sent to ${who}…`;
+  if (status?.listener === "busy") return `${who} is working on it…`;
+  if (recentlyActive) return `Queued. ${who} will pick it up as soon as it finishes the previous request.`;
+  return "Queued. Nobody is listening yet: start the autopilot (scripts/start-autopilot.cmd), or say “check Motion Studio” in the Claude chat.";
 }
 
 export function AskClaudeTab() {
@@ -265,9 +271,10 @@ export function AskClaudeTab() {
       <div className="flex shrink-0 flex-col gap-2 border-t border-border px-3 py-2">
         {transport === "desktop" && bridgeStatus !== null && !desktopConnected && !recentlyActive && !bridgeUnreachable && (
           <p dir="auto" className="rounded border border-accent-2/40 bg-accent-2/10 px-2 py-1 text-[11px] leading-[1.45] text-accent-2">
-            Claude is not listening. In the Claude app say <span className="font-medium">“listen to Motion Studio”</span>, in a chat
-            with the Motion Studio connector or a Code session in this project. Requests you send now wait in the queue; in a
-            chat you can also say <span className="font-medium">“check Motion Studio”</span> after sending.
+            Nobody is listening. Start the autopilot by double-clicking{" "}
+            <span className="font-medium">scripts/start-autopilot.cmd</span>: it answers every request on its own and costs
+            nothing while waiting. Or, in the Claude chat, say <span className="font-medium">“check Motion Studio”</span> after
+            sending. Requests you send now wait in the queue.
           </p>
         )}
         {transport === "desktop" && bridgeUnreachable && (
@@ -323,14 +330,15 @@ function DesktopPill({ status, unreachable, recentlyActive }: { status: BridgeSt
   }
   if (!status) return <span className="shrink-0 text-muted">checking…</span>;
   const idle = status.listener === "offline" && recentlyActive;
+  const who = listenerName(status);
   const label =
     status.listener === "listening"
-      ? "Claude Desktop"
+      ? who
       : status.listener === "busy"
-        ? "Claude Desktop · busy"
+        ? `${who} · busy`
         : idle
-          ? "Claude Desktop · between requests"
-          : "Claude Desktop · offline";
+          ? `${who} · between requests`
+          : "Claude · offline";
   const dot = status.listener === "busy" || idle ? "bg-accent-2" : status.listener === "offline" ? "bg-muted" : "bg-success";
   return (
     <span

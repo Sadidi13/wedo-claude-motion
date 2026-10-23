@@ -14,8 +14,10 @@ node scripts/motion-bridge.mjs <status|contract|project|wait|respond|fail|new|ed
 ```
 
 Scratch files go in `.motion-bridge/` (git-ignored). Details: `docs/CLAUDE-DESKTOP.md`. This skill is
-for Code sessions; the regular Claude chat uses the MCP connector `scripts/motion-studio-mcp.mjs`
-(`node scripts/motion-bridge.mjs install-chat` registers it in Claude Desktop).
+for Code sessions. The regular Claude chat uses the MCP connector `scripts/motion-studio-mcp.mjs`
+(`node scripts/motion-bridge.mjs install-chat` registers it in Claude Desktop), and
+`scripts/motion-autopilot.mjs` answers the editor with no session at all. Only one listener at a time:
+if the editor shows "Autopilot", do not also run `wait`.
 
 ## 0. Make sure the editor is running
 

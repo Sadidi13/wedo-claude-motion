@@ -247,10 +247,15 @@ export interface ExportJobStatus {
  */
 export type BridgeListenerState = "listening" | "busy" | "offline";
 
+/** What answers editor requests: a Code session's CLI, the chat's MCP connector, or the autopilot. */
+export type BridgeClient = "cli" | "mcp" | "headless";
+
 export interface BridgeStatus {
   listener: BridgeListenerState;
   /** epoch ms of the last poll from the listener, or null when it never polled */
   lastSeen: number | null;
+  /** who polled last: a Code session ("cli"), the chat connector ("mcp") or the autopilot ("headless") */
+  listenerClient: BridgeClient | null;
   /** requests waiting to be claimed */
   pending: number;
   /** the project the editor last shared with the server */

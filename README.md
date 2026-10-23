@@ -46,6 +46,9 @@ with no API key. Open this repository (or its parent folder) in a Claude session
   "Make the title bigger" edits the open project as one undo-able step.
 - **Editor to chat.** Say "listen to Motion Studio" in the chat once. From then on, the Ask Claude tab
   sends its requests to that session, and the answers are applied in the editor.
+- **Autopilot.** `pnpm autopilot`, or double-click `scripts/start-autopilot.cmd` on Windows, answers the
+  Ask Claude tab on its own with Claude Code and your Claude login. Waiting costs nothing; each request
+  is one short Claude Code run.
 
 Claude follows the `motion-studio` skill (`.claude/skills/motion-studio/SKILL.md`) and drives
 `scripts/motion-bridge.mjs`. Answers pass the same validation as API replies. Design and routes:

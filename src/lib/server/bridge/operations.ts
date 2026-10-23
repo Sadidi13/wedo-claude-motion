@@ -15,7 +15,16 @@ import { AiOutputSchema, buildMessages, finalizeOutput } from "@/lib/ai";
 import { createBlankProject } from "@/lib/importer";
 import { fileKindFor, textFile } from "@/lib/importer/files";
 import { parseScene } from "@/lib/parser";
-import type { AiEditRequest, AiEditResponse, AiErrorResponse, BridgeEvent, ParsedScene, Project, ProjectFile } from "@/lib/types";
+import type {
+  AiEditRequest,
+  AiEditResponse,
+  AiErrorResponse,
+  BridgeClient,
+  BridgeEvent,
+  ParsedScene,
+  Project,
+  ProjectFile,
+} from "@/lib/types";
 import { BridgeStateError, type BridgeRequestRecord, finishRequest, pushEvent, readSyncedProject } from "./store";
 
 /** Body of POST /api/bridge/requests/[id]/result. */
@@ -48,9 +57,17 @@ function tryParse(source: string | undefined): ParsedScene | null {
 }
 
 /** Who answers: a Claude Code session with the CLI, or the Claude chat through the MCP connector. */
-export type BriefClient = "cli" | "mcp";
+export type BriefClient = BridgeClient;
 
 function deliveryLines(id: string, client: BriefClient): string[] {
+  if (client === "headless") {
+    return [
+      'Reply with ONLY a JSON object: {"summary": "...", "code": "..."}, plus an optional "files" array of {"path", "content"}.',
+      "No text before or after it and no Markdown code fences around it. `code` follows the Output format rules of the system prompt.",
+      'If the instruction is not a change to this animation, reply {"error": "<short reason>"} instead.',
+      "",
+    ];
+  }
   if (client === "mcp") {
     return [
       'Answer with the `answer_request` tool: `request_id` "' +

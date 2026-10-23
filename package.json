@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "bridge": "node scripts/motion-bridge.mjs",
+    "autopilot": "node scripts/motion-autopilot.mjs",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

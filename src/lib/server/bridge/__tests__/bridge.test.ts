@@ -159,3 +159,22 @@ describe("events", () => {
     expect(layer.event.layerId).toBe("title");
   });
 });
+
+describe("clients", () => {
+  it("record who listens, so the editor can name the autopilot", async () => {
+    expect((await bridgeStatus()).listenerClient).toBeNull();
+    await claimNextRequest(new Date(), "headless");
+    expect(await bridgeStatus()).toMatchObject({ listener: "listening", listenerClient: "headless" });
+    await claimNextRequest(new Date(), "mcp");
+    expect((await bridgeStatus()).listenerClient).toBe("mcp");
+  });
+
+  it("word the brief for each client", async () => {
+    const record = await createRequest(makeRequest());
+    expect(buildBrief(record)).toContain("node scripts/motion-bridge.mjs respond");
+    expect(buildBrief(record, "mcp")).toContain("`answer_request` tool");
+    const headless = buildBrief(record, "headless");
+    expect(headless).toContain("Reply with ONLY a JSON object");
+    expect(headless).not.toContain("motion-bridge.mjs");
+  });
+});

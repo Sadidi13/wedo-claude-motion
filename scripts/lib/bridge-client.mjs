@@ -112,10 +112,10 @@ export async function getProject() {
 
 /**
  * Heartbeat + claim the oldest queued request: the request with its brief, or null.
- * `client: "mcp"` words the brief for the connector's tools instead of the CLI.
+ * `client: "mcp" | "headless"` words the brief for the connector's tools or the autopilot.
  */
 export async function claim({ signal, client = "cli" } = {}) {
-  const route = client === "mcp" ? "/api/bridge/claim?client=mcp" : "/api/bridge/claim";
+  const route = client === "cli" ? "/api/bridge/claim" : `/api/bridge/claim?client=${encodeURIComponent(client)}`;
   const result = await request("POST", route, { auth: true, signal });
   if (result.status === 204) return null;
   if (result.status !== 200) throw failure(result, "claim");
