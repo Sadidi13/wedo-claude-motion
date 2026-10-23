@@ -24,6 +24,7 @@ export const ALLOWED_BARE_IMPORTS: ReadonlySet<string> = new Set([
   "react-dom",
   "react-dom/client",
   "lucide-react",
+  "three",
   "@motion/runtime",
   "motion-runtime",
 ]);
@@ -35,8 +36,9 @@ const REEXPORT_RE = /\bexport\s+(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s+from\s+["']([
 /** Matches `require("m")` and dynamic `import("m")`. */
 const CALL_IMPORT_RE = /\b(?:require|import)\s*\(\s*["']([^"']+)["']\s*\)/g;
 
-/** APIs that make the picture depend on something other than the seeked time. */
-const FORBIDDEN_CALL_RE = /\b(Math\.random|Date\.now|setTimeout|setInterval|requestAnimationFrame)\s*\(/g;
+/** APIs that make the picture depend on something other than the seeked time (incl. three.js render loops). */
+const FORBIDDEN_CALL_RE =
+  /\b(Math\.random|Date\.now|performance\.now|setTimeout|setInterval|requestAnimationFrame|setAnimationLoop)\s*\(/g;
 
 /** `styles.css`, `components/Card.jsx` — no leading slash, no `..`, no backslashes, no empty segments. */
 const SAFE_RELATIVE_PATH_RE = /^(?!\.\.?(?:\/|$))[\w.\-]+(?:\/(?!\.\.?(?:\/|$))[\w.\-]+)*$/;
@@ -59,7 +61,7 @@ export function findDisallowedImports(source: string): string[] {
   return [...found];
 }
 
-/** Calls of `Math.random`, `Date.now`, `setTimeout`, `setInterval`, `requestAnimationFrame`, deduplicated. */
+/** Calls of `Math.random`, `Date.now`, `performance.now`, timers, `requestAnimationFrame`, `setAnimationLoop`, deduplicated. */
 export function findForbiddenCalls(source: string): string[] {
   const found = new Set<string>();
   for (const match of source.matchAll(FORBIDDEN_CALL_RE)) found.add(match[1]);

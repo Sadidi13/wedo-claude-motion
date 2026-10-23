@@ -27,6 +27,13 @@ describe("resolveSpecifier: builtins and aliases", () => {
     expect(resolveSpecifier("scene.jsx", "lucide-react", files)).toEqual({ kind: "builtin", name: "lucide-react" });
   });
 
+  it("maps three, but not three.js addons (only the main module is provided)", () => {
+    expect(resolveSpecifier("scene.jsx", "three", files)).toEqual({ kind: "builtin", name: "three" });
+    for (const addon of ["three/addons/controls/OrbitControls.js", "three/examples/jsm/postprocessing/EffectComposer.js"]) {
+      expect(() => resolveSpecifier("scene.jsx", addon, files)).toThrowError(`Unsupported import '${addon}' in file scene.jsx`);
+    }
+  });
+
   it("maps every runtime alias to the runtime, even when the project ships its own animations.jsx", () => {
     for (const spec of ["./animations.jsx", "./animations", "./animations.js", "@motion/runtime", "motion-runtime"]) {
       expect(resolveSpecifier("scene.jsx", spec, files)).toEqual({ kind: "builtin", name: "runtime" });

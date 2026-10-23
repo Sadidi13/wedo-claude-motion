@@ -3,13 +3,23 @@ import { describe, expect, it } from "vitest";
 import { ensureLayerIds, listLayerIds, parseScene } from "@/lib/parser";
 import { samples } from "../index";
 
-const ALLOWED_IMPORTS = /^(react|react-dom(\/client)?|lucide-react|\.\/animations\.jsx|\.\/[\w./-]+)$/;
+const ALLOWED_IMPORTS = /^(react|react-dom(\/client)?|lucide-react|three|\.\/animations\.jsx|\.\/[\w./-]+)$/;
 
 describe("samples", () => {
-  it("ships product-launch and lower-third with the contract meta", () => {
-    expect(samples.map((s) => s.id)).toEqual(["product-launch", "lower-third"]);
+  it("ships product-launch, lower-third and dolly-3d with the contract meta", () => {
+    expect(samples.map((s) => s.id)).toEqual(["product-launch", "lower-third", "dolly-3d"]);
     expect(samples[0].project.meta).toEqual({ width: 1280, height: 720, duration: 8, fps: 30, background: "#0b0b12" });
     expect(samples[1].project.meta).toEqual({ width: 1920, height: 1080, duration: 5, fps: 30, background: "#101418" });
+    expect(samples[2].project.meta).toEqual({ width: 1080, height: 1920, duration: 6, fps: 30, background: "#07080d" });
+  });
+
+  it("dolly-3d draws its world in one Three3D canvas layer and the text as 2D layers", () => {
+    const source = samples[2].project.files["scene.jsx"].content;
+    const scene = parseScene(source);
+    expect(source).toContain('import * as THREE from "three";');
+    expect(scene.layers.map((l) => l.name)).toEqual(["3D world", "Vignette", "Kicker", "Title", "Subtitle"]);
+    expect(scene.byId.world.children.map((c) => [c.id, c.kind])).toEqual([["corridor", "canvas"]]);
+    expect(source).not.toMatch(/performance\.now|setAnimationLoop|\+=/);
   });
 
   it.each(samples.map((s) => [s.id, s] as const))("%s parses with ≥ 5 named top-level Sprites and no warnings", (_id, sample) => {

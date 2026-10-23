@@ -72,4 +72,28 @@ describe("edge cases", () => {
     expect(scene.byId.s.hidden).toBe(true);
     expect(scene.warnings).toEqual([]);
   });
+
+  it("makes a 3D canvas one 'canvas' layer: JSX inside its setup / render props is not a layer", () => {
+    const src = wrap(
+      [
+        "    <Stage width={1080} height={1920} duration={6} fps={30}>",
+        '      <Sprite start={0} end={6} data-layer-id="world" data-layer-name="3D world">',
+        "        <Three3D",
+        '          data-layer-id="three"',
+        "          setup={({ scene }) => { scene.add(makeBox()); return { label: <b>not a layer</b> }; }}",
+        "          render={(t, { camera }) => { camera.position.z = 8 - t; }}",
+        "        />",
+        "      </Sprite>",
+        '      <canvas data-layer-id="raw" />',
+        "    </Stage>",
+      ].join("\n"),
+    );
+    const { source, changed } = ensureLayerIds(src);
+    expect(changed).toBe(false);
+    const scene = parseScene(source);
+    expect(Object.keys(scene.byId).sort()).toEqual(["raw", "three", "world"]);
+    expect(scene.byId.three).toMatchObject({ kind: "canvas", name: "<Three3D>", parentId: "world", children: [] });
+    expect(scene.byId.three.range).toEqual({ start: 0, end: 6 });
+    expect(scene.byId.raw.kind).toBe("canvas");
+  });
 });

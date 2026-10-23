@@ -122,6 +122,31 @@ createRoot(document.body).render(<Scene />);
     expect(warnings).toEqual([]);
   });
 
+  it("drops the three.js CDN build without a warning and imports the THREE global it provided", () => {
+    const html = `<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<script type="text/babel">
+function Scene() {
+  return (
+    <Stage width={640} height={360} duration={3} fps={30}>
+      <Sprite start={0} end={3}>
+        <Three3D setup={({ scene }) => { scene.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshNormalMaterial())); }} />
+      </Sprite>
+    </Stage>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Scene />);
+</script>`;
+    const { project, warnings } = importFromHtmlDetailed(html);
+    const scene = project.files["scene.jsx"].content;
+    expect(warnings).toEqual([]);
+    expect(scene).toContain('import * as THREE from "three";');
+    expect(scene).toContain('import { Stage, Sprite, Three3D } from "./animations.jsx";');
+    expect(scene).not.toContain("unpkg");
+    const layers = parseScene(scene).layers;
+    expect(layers[0].children.map((l) => l.kind)).toEqual(["canvas"]);
+  });
+
   it("returns an empty Stage with a warning for an empty page and exposes the plain variant", () => {
     const { project, warnings } = importFromHtmlDetailed("<html><body></body></html>");
     expect(warnings).toEqual([expect.stringContaining("empty Stage")]);

@@ -6,6 +6,7 @@
  */
 import { ensureLayerIds, parseScene } from "@/lib/parser";
 import type { Project } from "@/lib/types";
+import { DOLLY_3D_SOURCE } from "./dolly3d";
 import { LOWER_THIRD_SOURCE } from "./lowerThird";
 import { PRODUCT_LAUNCH_SOURCE } from "./productLaunch";
 
@@ -48,5 +49,12 @@ export const samples: Sample[] = [
     description:
       "1920×1080, 5 s. A name / title plate that slides in, holds and slides out — export it with alpha to overlay on footage.",
     project: sampleProject("lower-third", "Lower third", LOWER_THIRD_SOURCE),
+  },
+  {
+    id: "dolly-3d",
+    name: "3D dolly",
+    description:
+      "1080×1920, 6 s. A three.js layer: the camera glides down a corridor of lit boxes towards a glowing sign, then a title lands.",
+    project: sampleProject("dolly-3d", "3D dolly", DOLLY_3D_SOURCE),
   },
 ];

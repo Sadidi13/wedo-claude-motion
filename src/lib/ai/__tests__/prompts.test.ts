@@ -3,6 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import { parseScene } from "@/lib/parser";
 import { SYSTEM_PROMPT, ancestorChain, buildMessages, buildSystem, buildUserMessage, layerTreeLines, numberLines } from "../prompts";
+import { validateAiOutput } from "../validate";
 import { SCENE_SOURCE, STYLES_SOURCE, makeProject, makeRequest } from "./fixture";
 
 const scene = parseScene(SCENE_SOURCE);
@@ -23,6 +24,13 @@ describe("SYSTEM_PROMPT", () => {
       "easeOutElastic",
       "`./animations.jsx`",
       "`lucide-react`",
+      "`three` (three.js 0.186",
+      "| `Three3D` |",
+      "# 3. 3D scenes (three.js)",
+      "never increment it",
+      "`THREE.MathUtils.seededRandom(i + 1)`",
+      'textures={{ logo: "assets/logo.png" }}',
+      "<Three3D",
       "`@motion/runtime`",
       "`data-layer-id`",
       "`data-layer-name`",
@@ -47,6 +55,16 @@ describe("SYSTEM_PROMPT", () => {
     const system = buildSystem();
     expect(system).toHaveLength(1);
     expect(system[0]).toEqual({ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } });
+  });
+
+  it("ships a 3D example that passes its own validation as a new scene", () => {
+    const example = /```jsx\n([\s\S]*?)```/.exec(SYSTEM_PROMPT)?.[1];
+    expect(example).toContain("<Three3D");
+    const result = validateAiOutput({ summary: "3D example", code: example ?? "" }, { scope: "new", entryPath: "scene.jsx" });
+    expect(result).toMatchObject({ ok: true });
+    const parsed = parseScene(result.ok ? (result.sceneCode ?? "") : "");
+    expect(parsed.layers.map((layer) => layer.name)).toEqual(["3D boxes", "Title"]);
+    expect(parsed.layers[0].children.map((layer) => layer.kind)).toEqual(["canvas"]);
   });
 });
 

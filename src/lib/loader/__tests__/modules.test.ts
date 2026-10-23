@@ -22,6 +22,7 @@ function system(files: Record<string, ProjectFile>, overrides: Partial<ModuleSys
       react: asEsModule(fakeReact),
       "react-dom": createReactDomShim(() => {}),
       "lucide-react": asEsModule({ Star: "Star" }),
+      three: asEsModule({ Mesh: "Mesh", REVISION: "186" }),
       runtime: asEsModule(runtime),
     },
     ...overrides,
@@ -100,6 +101,19 @@ export const all = [typeof ReactDOM.createRoot, Star, rt.Sprite];`,
       ),
     });
     expect((sys.load("scene.jsx") as { all: unknown[] }).all).toEqual(["function", "Star", "Sprite"]);
+  });
+
+  it("hands out three for namespace, named and default imports", () => {
+    const { sys } = system({
+      "scene.jsx": file(
+        "scene.jsx",
+        `import * as THREE from "three";
+import { Mesh } from "three";
+import three from "three";
+export const all = [THREE.REVISION, Mesh, three.Mesh];`,
+      ),
+    });
+    expect((sys.load("scene.jsx") as { all: unknown[] }).all).toEqual(["186", "Mesh", "Mesh"]);
   });
 
   it("throws LoadError for unsupported imports, naming the importing file", () => {

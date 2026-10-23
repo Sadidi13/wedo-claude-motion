@@ -65,6 +65,7 @@ export type LayerKind =
   | "image" // <img> / <Image>
   | "shape" // <svg>, <div> with no text children, <circle> …
   | "group" // element with element children (container)
+  | "canvas" // <Three3D> (a three.js scene) or <canvas>: one drawn layer, no sub-layers inside
   | "component" // custom React component (capitalised tag, not Sprite)
   | "element"; // anything else
 

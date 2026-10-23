@@ -7,15 +7,16 @@
  * one declaration per module (first-appearance order) — but only when
  * something actually has to change (`MergeResult.changed`), so a clean
  * scene.jsx keeps its import lines byte-for-byte. CDN URLs for the packages
- * the loader provides are normalised to their bare names, and the runtime is
- * always referenced as "./animations.jsx".
+ * the loader provides are normalised to their bare names (for three.js only
+ * the main module: addons such as `three/addons/…` are not provided), and the
+ * runtime is always referenced as "./animations.jsx".
  */
 import type { ImportInfo, ImportSpecifierInfo } from "./ast";
 
 export const RUNTIME_SPECIFIER = "./animations.jsx";
 
 /** Modules the loader resolves (CONTRACTS §1); anything else cannot load. */
-const PROVIDED_MODULES = new Set(["react", "react-dom", "react-dom/client", "lucide-react", RUNTIME_SPECIFIER]);
+const PROVIDED_MODULES = new Set(["react", "react-dom", "react-dom/client", "lucide-react", "three", RUNTIME_SPECIFIER]);
 
 export interface MergedImport {
   source: string;
@@ -30,6 +31,8 @@ const URL_PACKAGES: { pattern: RegExp; name: string }[] = [
   { pattern: /\/react-dom(@[^/]*)?(\/|\?|$)/, name: "react-dom" },
   { pattern: /\/react(@[^/]*)?(\/|\?|$)/, name: "react" },
   { pattern: /\/lucide-react(@[^/]*)?(\/|\?|$)/, name: "lucide-react" },
+  // esm.sh/three@x, unpkg / jsdelivr …/three@x/build/three.module(.min).js or /+esm — never three/addons/…
+  { pattern: /\/three(@[^/?#]*)?(\/build\/three\.module(\.min)?\.js|\/\+esm)?([?#].*)?$/, name: "three" },
 ];
 
 const RUNTIME_SOURCE = /^(?:\.\/|\/)?(?:src\/)?animations(?:\.(?:jsx|js|tsx|ts))?$|^(?:@motion\/runtime|motion-runtime)$/;
@@ -136,6 +139,13 @@ export function ensureDefaultImport(target: MergedImport[], bound: readonly Merg
   if (bindsLocal(bound, name) || bindsLocal(target, name)) return;
   const merged = entryFor(target, source);
   merged.defaultName ??= name;
+}
+
+/** Ensure `import * as Name from source` exists in `target`. */
+export function ensureNamespaceImport(target: MergedImport[], bound: readonly MergedImport[], source: string, name: string): void {
+  if (bindsLocal(bound, name) || bindsLocal(target, name)) return;
+  const merged = entryFor(target, source);
+  merged.namespace ??= name;
 }
 
 /** Render merged imports as source lines (one `import` per module, namespace imports on their own line). */

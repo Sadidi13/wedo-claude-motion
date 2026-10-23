@@ -4,9 +4,14 @@
  * Opens `${origin}/preview?job=<id>&__render=1[&transparent=1]` in Chromium
  * (playwright-core), waits for the runtime globals, then drives
  * `window.__seek(t)` frame by frame and screenshots the stage clip into
- * `<jobDir>/frames/f_%06d.(png|jpg)`. Frames are split into contiguous ranges,
- * one BrowserContext + page per worker. status.json is updated every 10 frames
- * and on completion; the browser is always closed in `finally`.
+ * `<jobDir>/frames/f_%06d.(png|jpg)`. After each seek it awaits
+ * `window.__whenIdle()` (pending <Three3D> textures) and two animation frames,
+ * so WebGL canvases — drawn synchronously inside `__seek` with
+ * preserveDrawingBuffer — are on screen. Projects that draw with WebGL get the
+ * extra Chromium switches of `webglLaunchArgs`. Frames are split into
+ * contiguous ranges, one BrowserContext + page per worker. status.json is
+ * updated every 10 frames and on completion; the browser is always closed in
+ * `finally`.
  *
  * Tests pass `pageUrl` to render any page that implements the same globals.
  */
@@ -15,6 +20,7 @@ import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { chromium, type Browser } from "playwright-core";
+import type { Project } from "@/lib/types";
 import { jobDir, readOptions, readProject, writeStatus } from "./jobs";
 import { frameFileName, frameTime, partitionFrames, resolvePlan, type FrameRange, type RenderPlan } from "./plan";
 
@@ -35,6 +41,7 @@ interface PreviewGlobals {
   __ready?: boolean;
   __seek?: (time: number) => void;
   __videoMeta?: unknown;
+  __whenIdle?: () => Promise<void>;
 }
 
 export const DEFAULT_WORKERS = 3;
@@ -45,6 +52,41 @@ const SEEK_TIMEOUT_MS = 15_000;
 const FONT_SETTLE_MS = 300;
 const STATUS_EVERY_FRAMES = 10;
 export const CHROMIUM_LAUNCH_ARGS = ["--disable-dev-shm-usage", "--force-color-profile=srgb"];
+
+/** Scene code that draws with WebGL: the runtime's <Three3D>, a `three` import, or a raw WebGL context. */
+const WEBGL_SOURCE =
+  /\bThree3D\b|\bfrom\s*["']three["']|\brequire\(\s*["']three["']\s*\)|getContext\(\s*["'](?:webgl2?|experimental-webgl)["']/;
+const SCRIPT_KINDS: ReadonlySet<string> = new Set(["jsx", "js", "tsx", "ts", "html"]);
+
+export function projectUsesWebGL(project: Pick<Project, "files">): boolean {
+  return Object.values(project.files).some((file) => SCRIPT_KINDS.has(file.kind) && WEBGL_SOURCE.test(file.content));
+}
+
+/**
+ * How export draws WebGL. "gpu" (default): the machine's GPU, which headless Chrome uses when
+ * it has one (Windows: ANGLE on Direct3D 11), falling back to SwiftShader on machines without
+ * one (CI, VMs, remote desktops). "swiftshader" (MOTION_STUDIO_WEBGL=swiftshader): always the
+ * software renderer — slower, but the same pixels on every machine and immune to driver bugs.
+ */
+export type WebGLMode = "gpu" | "swiftshader";
+
+export function webglMode(env: Record<string, string | undefined> = process.env): WebGLMode {
+  return env.MOTION_STUDIO_WEBGL === "swiftshader" ? "swiftshader" : "gpu";
+}
+
+/**
+ * Chromium only runs WebGL on SwiftShader with --enable-unsafe-swiftshader ("unsafe": its JIT
+ * is attack surface for web content). It is added for 3D projects only, and the sandbox
+ * stays on (see chromiumSandboxEnabled).
+ */
+export function webglLaunchArgs(mode: WebGLMode): string[] {
+  return mode === "swiftshader" ? ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] : ["--enable-unsafe-swiftshader"];
+}
+
+/** The Chromium switches for one export: the base set, plus the WebGL ones when the scene needs them. */
+export function chromiumLaunchArgs(webgl: boolean, env: Record<string, string | undefined> = process.env): string[] {
+  return webgl ? [...CHROMIUM_LAUNCH_ARGS, ...webglLaunchArgs(webglMode(env))] : [...CHROMIUM_LAUNCH_ARGS];
+}
 
 /**
  * Whether export runs Chromium with its sandbox. The pages it renders run imported (untrusted)
@@ -197,10 +239,12 @@ async function renderRange(
       await withTimeout(
         page.evaluate(
           (t) =>
-            new Promise<void>((resolve) => {
+            new Promise<void>((resolve, reject) => {
               const w = window as unknown as PreviewGlobals;
               if (typeof w.__seek === "function") w.__seek(t);
-              requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+              // Pending work (textures) first, then two frames so the drawn canvas is composited.
+              const idle = typeof w.__whenIdle === "function" ? w.__whenIdle() : Promise.resolve();
+              idle.then(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())), reject);
             }),
           frameTime(plan, index),
         ),
@@ -238,7 +282,7 @@ export async function renderJob(jobId: string, origin: string, opts: RenderOptio
 
   const browser = await chromium.launch({
     executablePath: resolveChromiumPath(),
-    args: CHROMIUM_LAUNCH_ARGS,
+    args: chromiumLaunchArgs(projectUsesWebGL(project)),
     chromiumSandbox: chromiumSandboxEnabled(),
   });
   try {

@@ -210,7 +210,8 @@ export default function Scene() {
 ```
 
 - حرکت فقط تابع زمان است: `useTime`, `useSprite`, `interpolate`, `animate`, `Easing`. بدون CSS transition/keyframes، بدون `setTimeout`/`Math.random`.
-- ایمپورت‌های مجاز: `react`، `react-dom`، `lucide-react`، `./animations.jsx` و فایل‌های نسبی پروژه (`./Card.jsx`, `./styles.css`, `assets/logo.png`).
+- ایمپورت‌های مجاز: `react`، `react-dom`، `lucide-react`، `three` (فقط ماژول اصلی three.js، بدون addonها)، `./animations.jsx` و فایل‌های نسبی پروژه (`./Card.jsx`, `./styles.css`, `assets/logo.png`).
+- سه‌بعدی واقعی: `<Three3D>` یک صحنهٔ three.js را به‌صورت **یک لایه** می‌کشد. `setup` صحنه را یک بار می‌سازد و `render(t, …)` در هر فریم دوربین و اشیا را فقط از روی زمان `t` تنظیم می‌کند (بدون `+=`، بدون `setAnimationLoop`). عنوان‌ها لایه‌های دوبعدی معمولی روی آن هستند. نمونهٔ آماده: **3D dolly** در پنجرهٔ Import.
 - هر المان داخل Stage یک `data-layer-id` پایدار می‌گیرد (خودکار). نام دلخواه با `data-layer-name`.
 
 ---
@@ -220,6 +221,7 @@ export default function Scene() {
 | علامت | علت / راه‌حل |
 |---|---|
 | «Preview error: Unsupported import 'x'» | کد از پکیجی استفاده می‌کند که در پیش‌نمایش نیست. با Ask Claude بگو «بدون x بنویس» یا پکیج را به لودر اضافه کن. |
+| «Three3D: WebGL is not available in this browser» | مرورگر WebGL را خاموش کرده (یا کارت گرافیک در دسترس نیست). شتاب سخت‌افزاری مرورگر را روشن کن. خروجی ویدیو جدا از مرورگر تو ساخته می‌شود و اگر کارت گرافیک نباشد خودش از رندر نرم‌افزاری استفاده می‌کند. |
 | بالای ویرایشگر نوشته «Claude is connected to another WeDo Claude Motion tab» | ویرایشگر در تب دیگری هم باز است و Claude با آن تب کار می‌کند. یا آن تب را ببند، یا در همین تب روی **Use this tab** بزن. |
 | پورت 3000 اشغال است و سرور روی پورت دیگری بالا آمده | کاری لازم نیست. ابزارهای Claude پورت واقعی را خودشان پیدا می‌کنند. ویرایشگر را با همان آدرسی که سرور نشان می‌دهد باز کن. |
 | تب Ask Claude می‌گوید «Claude Desktop · offline» | در اپ Claude بنویس «به موشن استودیو گوش بده». درخواست‌هایی که فرستادی در صف می‌مانند و بعد جواب می‌گیرند. |

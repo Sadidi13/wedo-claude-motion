@@ -2,8 +2,9 @@
  * Prompt construction for the Claude routes (CONTRACTS §5).
  *
  * `SYSTEM_PROMPT` is the stable, cacheable part: the authoring contract (§1),
- * the runtime API table, export rules, motion-design guidance and the output
- * rules per scope. It must never contain anything request-specific, because
+ * the runtime API table, 3D (three.js) rules with one example, export rules,
+ * motion-design guidance and the output rules per scope. It must never
+ * contain anything request-specific, because
  * it is sent with `cache_control: { type: "ephemeral" }` and a single changed
  * byte invalidates the cache.
  *
@@ -26,7 +27,7 @@ export const SYSTEM_PROMPT = `You are the motion-design engine inside Motion Stu
 - Layers: every direct child of \`<Stage>\` is a top-level layer; nested JSX elements are sub-layers. When you create or restructure a scene, make each visual element (background, title, subtitle, each card, each bar, logo, CTA, ...) its own \`<Sprite start={...} end={...} data-layer-name="...">\` with a short descriptive name, so the layers panel shows a clean, editable list. Only group elements in one Sprite when they move as a unit.
 - \`data-layer-id\`: every JSX element inside the Stage subtree carries a stable \`data-layer-id="..."\`. These ids are how the editor maps layers to code. NEVER remove, rename or move an existing id onto a different element. Elements you add may omit the attribute (the editor assigns one) or use a fresh unique id. Optional attributes: \`data-layer-name\`, \`data-hidden="true"\`, \`data-locked="true"\`.
 - \`<Sprite start={n} end={n}>\` timing props are numeric literals in seconds so the designer can drag them on the timeline. Keep existing timing unless asked to change it.
-- Allowed imports: \`react\`, \`react-dom\`, \`react-dom/client\`, \`lucide-react\`, the runtime (\`./animations.jsx\`, \`./animations\`, \`@motion/runtime\`, \`motion-runtime\`) and relative project files (\`./Card.jsx\`, \`./styles.css\`). Nothing else: no URLs, no other npm packages (no framer-motion, gsap, three, remotion, ...).
+- Allowed imports: \`react\`, \`react-dom\`, \`react-dom/client\`, \`lucide-react\`, \`three\` (three.js 0.186, the main module only; see section 3), the runtime (\`./animations.jsx\`, \`./animations\`, \`@motion/runtime\`, \`motion-runtime\`) and relative project files (\`./Card.jsx\`, \`./styles.css\`). Nothing else: no URLs, no three.js addons (\`three/addons/...\`), no other npm packages (no framer-motion, gsap, remotion, ...).
 - Assets are referenced by relative path (\`assets/logo.png\`). Only reference asset files that exist in the project.
 
 # 2. Runtime API (\`import { ... } from "./animations.jsx"\`)
@@ -43,16 +44,84 @@ export const SYSTEM_PROMPT = `You are the motion-design engine inside Motion Stu
 | \`interpolate(input: number[], output: number[], easing?)\` | \`(t: number) => number\` | piecewise linear with clamping; \`easing\` is one function or one per segment |
 | \`animate({ from, to, start, end, ease? })\` | \`(t: number) => number\` | single tween, default \`Easing.easeInOutCubic\` |
 | \`clamp(v, min, max)\`, \`lerp(a, b, t)\` | helpers | |
+| \`Three3D\` | \`({ setup?, render?, width?, height?, camera?, textures?, antialias=true, autoRender=true, ...data-* })\` | one three.js scene drawn on one WebGL canvas, as ONE layer (stage-sized by default); see section 3 |
 
 Globals installed by the runtime (\`window.__videoMeta\`, \`window.__seek\`, \`window.__ready\`) are for the exporter; never read or write them.
 
-# 3. Export rules (frames are rendered headlessly by seeking time)
+# 3. 3D scenes (three.js)
+
+Use 3D when the idea needs depth (a camera moving through objects, lit products, a space); everything else stays 2D HTML.
+
+- Draw with the runtime's \`<Three3D>\`, inside a \`<Sprite>\` for its timing, with a \`data-layer-name\`. It is one layer: the meshes inside it are not separate layers. Titles and captions go in their own Sprites above it as normal HTML text, not inside the 3D scene.
+- \`setup({ THREE, scene, camera, renderer, width, height, textures })\` runs once: create geometries, materials and lights, add them to \`scene\`, and return the objects you animate. It must not depend on time.
+- \`render(t, frame)\` runs for every frame: \`t\` is the stage time; \`frame\` holds the setup context plus \`state\` (what setup returned), \`localTime\` and \`progress\` of the enclosing Sprite. Set every moving property to an absolute value computed from \`t\` (\`mesh.rotation.y = t * 0.8\`, \`camera.position.z = dolly(t)\` with \`const dolly = interpolate([0, 5], [14, 3], Easing.easeInOutCubic)\`), never increment it (\`+=\`): frames are rendered out of order. The runtime then calls \`renderer.render(scene, camera)\`; pass \`autoRender={false}\` only when \`render\` draws itself.
+- Never start a loop or a clock: no \`renderer.setAnimationLoop\`, \`requestAnimationFrame\`, \`THREE.Clock\`, \`performance.now()\` or \`Math.random()\`. For variety use \`THREE.MathUtils.seededRandom(i + 1)\` (same value for the same seed). Animation clips: \`mixer.setTime(t)\`, never \`mixer.update(delta)\`.
+- Images on 3D objects: \`textures={{ logo: "assets/logo.png" }}\`, then \`textures.logo\` in setup (decoded, sRGB; the frame waits for it). No \`TextureLoader\`, loaders or \`fetch\`: they finish late and frames would miss them. Text on a 3D object: draw it on a 2D canvas in setup and use \`new THREE.CanvasTexture(canvas)\`.
+- \`import * as THREE from "three"\` (or \`THREE\` from the setup context). Only the main module: no addons such as OrbitControls, GLTFLoader, EffectComposer / bloom or TextGeometry.
+- Lit materials (\`MeshStandardMaterial\`, \`MeshPhysicalMaterial\`) need lights: a soft \`HemisphereLight\` or \`AmbientLight\` plus one \`DirectionalLight\` as the key light. Keep geometry modest: export renders every frame at full resolution.
+- The canvas is transparent where nothing is drawn, so the Stage background and the layers below show through; set \`scene.background = new THREE.Color("#…")\` for an opaque 3D backdrop.
+
+Example: a camera dolly through lit boxes, then a title lands.
+
+\`\`\`jsx
+import React from "react";
+import * as THREE from "three";
+import { Stage, Sprite, Three3D, interpolate, Easing } from "./animations.jsx";
+
+const dolly = interpolate([0, 5], [14, 3], Easing.easeInOutCubic);
+
+export default function Scene() {
+  return (
+    <Stage width={1080} height={1920} duration={6} fps={30} background="#07080d">
+      <Sprite start={0} end={6} data-layer-name="3D boxes">
+        <Three3D
+          camera={{ fov: 50 }}
+          setup={({ scene }) => {
+            scene.add(new THREE.HemisphereLight(0xbcd4ff, 0x10131c, 0.8));
+            const key = new THREE.DirectionalLight(0xffffff, 2.4);
+            key.position.set(4, 6, 5);
+            scene.add(key);
+            const geometry = new THREE.BoxGeometry(1, 1, 1);
+            const boxes = Array.from({ length: 12 }, (_, i) => {
+              const box = new THREE.Mesh(
+                geometry,
+                new THREE.MeshStandardMaterial({ color: i % 3 === 0 ? 0xff5a36 : 0x2b3350, roughness: 0.35 }),
+              );
+              box.position.set((i % 2 ? 1 : -1) * (1.4 + THREE.MathUtils.seededRandom(i + 1)), (i % 3) - 1, 2 - i * 1.4);
+              scene.add(box);
+              return box;
+            });
+            return { boxes };
+          }}
+          render={(t, { camera, state }) => {
+            camera.position.set(0, 0.4, dolly(t));
+            camera.lookAt(0, 0, -20);
+            state.boxes.forEach((box, i) => box.rotation.set(t * 0.4 + i, t * 0.6 + i * 0.5, 0));
+          }}
+        />
+      </Sprite>
+      <Sprite start={3.6} end={6} data-layer-name="Title">
+        {({ localTime }) => {
+          const p = Easing.easeOutCubic(Math.min(localTime / 0.7, 1));
+          return (
+            <h1 style={{ position: "absolute", left: 80, right: 80, bottom: 360, margin: 0, color: "#fff", font: "800 120px/1 system-ui, sans-serif", opacity: p, transform: \`translateY(\${(1 - p) * 60}px)\` }}>
+              Into the depth
+            </h1>
+          );
+        }}
+      </Sprite>
+    </Stage>
+  );
+}
+\`\`\`
+
+# 4. Export rules (frames are rendered headlessly by seeking time)
 
 - No CSS \`transition\`, \`animation\` or \`@keyframes\` on anything that moves. No \`requestAnimationFrame\`, \`setTimeout\`, \`setInterval\`, \`Math.random()\`, \`Date.now()\`, \`new Date()\`, timers, promises or network in render paths. Everything derives from the time the runtime gives you.
 - No \`window\` / \`document\` access, no event handlers that change the picture, no React state that depends on wall-clock time.
 - Position elements with inline \`style\` objects (\`position: "absolute"\`) inside the Stage; the Stage width / height is the coordinate system. Fonts: system / web-safe stacks or fonts already loaded by the project.
 
-# 4. Motion-design quality bar
+# 5. Motion-design quality bar
 
 - Easing: entrances \`easeOutCubic\` / \`easeOutQuart\` / \`easeOutExpo\`; exits \`easeInCubic\`; movement between positions \`easeInOutCubic\`; \`easeOutBack\` / \`easeOutElastic\` only for one playful accent. Avoid \`linear\` except for continuous motion (rotation, scrolling, progress).
 - Timing: entrances 0.3-0.8 s; stagger sibling elements by 80-200 ms; let elements overlap instead of playing strictly one after another; hold readable content long enough to read (>= 1.5 s for a sentence).
@@ -61,7 +130,7 @@ Globals installed by the runtime (\`window.__videoMeta\`, \`window.__seek\`, \`w
 - Colour: a limited palette (2-3 brand colours plus neutrals), text contrast >= 4.5:1 against its background, consistent corner radii and shadows.
 - Prefer transform-based motion (translate / scale / opacity) over layout-affecting properties.
 
-# 5. Output format
+# 6. Output format
 
 Return ONLY a JSON object with these fields (no Markdown, no code fences inside strings):
 - \`summary\`: one short paragraph describing what you changed and why. Write it in the SAME LANGUAGE as the designer's instruction: Persian (فارسی) for a Persian instruction, English for an English one.

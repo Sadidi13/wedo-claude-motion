@@ -1,12 +1,17 @@
 import { existsSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
+import type { ProjectFile } from "@/lib/types";
 import {
   CHROMIUM_LAUNCH_ARGS,
   DEFAULT_WORKERS,
+  chromiumLaunchArgs,
   chromiumSandboxEnabled,
   isAllowedRenderRequest,
   previewUrl,
+  projectUsesWebGL,
   resolveChromiumPath,
+  webglLaunchArgs,
+  webglMode,
 } from "../renderer";
 
 describe("previewUrl", () => {
@@ -76,5 +81,33 @@ describe("isAllowedRenderRequest", () => {
     expect(allowed("http://localhost:3000/api/bridge/requests")).toBe(false);
     expect(allowed("http://localhost:3000/api/export/otherjob000000/project")).toBe(false);
     expect(allowed("http://localhost:3000/")).toBe(false);
+  });
+});
+
+describe("WebGL exports", () => {
+  const project = (content: string, kind: ProjectFile["kind"] = "jsx") => ({
+    files: { "scene.jsx": { path: "scene.jsx", kind, content } },
+  });
+
+  it("detects scenes that draw with WebGL", () => {
+    expect(projectUsesWebGL(project('import * as THREE from "three";'))).toBe(true);
+    expect(projectUsesWebGL(project("import { Stage, Three3D } from './animations.jsx';"))).toBe(true);
+    expect(projectUsesWebGL(project('const gl = canvas.getContext("webgl2");', "js"))).toBe(true);
+    expect(projectUsesWebGL(project('import { Stage } from "./animations.jsx"; // threefold'))).toBe(false);
+    expect(projectUsesWebGL(project("body { content: 'Three3D'; }", "css"))).toBe(false);
+  });
+
+  it("uses the GPU with a SwiftShader fallback by default, or SwiftShader only when asked", () => {
+    expect(webglMode({})).toBe("gpu");
+    expect(webglMode({ MOTION_STUDIO_WEBGL: "swiftshader" })).toBe("swiftshader");
+    expect(webglLaunchArgs("gpu")).toEqual(["--enable-unsafe-swiftshader"]);
+    expect(webglLaunchArgs("swiftshader")).toEqual(["--use-angle=swiftshader", "--enable-unsafe-swiftshader"]);
+  });
+
+  it("adds the WebGL switches only to 3D exports and never drops the sandbox", () => {
+    expect(chromiumLaunchArgs(false, {})).toEqual(CHROMIUM_LAUNCH_ARGS);
+    expect(chromiumLaunchArgs(true, {})).toEqual([...CHROMIUM_LAUNCH_ARGS, "--enable-unsafe-swiftshader"]);
+    expect(chromiumLaunchArgs(true, { MOTION_STUDIO_WEBGL: "swiftshader" })).toContain("--use-angle=swiftshader");
+    expect(chromiumLaunchArgs(true, {})).not.toContain("--no-sandbox");
   });
 });

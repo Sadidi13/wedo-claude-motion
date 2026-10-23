@@ -25,6 +25,7 @@ describe("findDisallowedImports", () => {
     const src = `import React from "react";
 import ReactDOM from "react-dom/client";
 import { Zap } from 'lucide-react';
+import * as THREE from "three";
 import { Stage } from "./animations.jsx";
 import { Card } from "../shared/Card.jsx";
 import "./styles.css";
@@ -41,7 +42,7 @@ import "https://cdn.example.com/lib.js";
 import {
   a,
   b,
-} from "three";
+} from "three/addons/controls/OrbitControls.js";
 export * from "lodash";
 const x = require("lodash");
 const y = await import("remotion");`;
@@ -49,10 +50,11 @@ const y = await import("remotion");`;
       "framer-motion",
       "gsap",
       "https://cdn.example.com/lib.js",
-      "three",
+      "three/addons/controls/OrbitControls.js",
       "lodash",
       "remotion",
     ]);
+    expect(isAllowedImport("three")).toBe(true);
     expect(isAllowedImport("react")).toBe(true);
     expect(isAllowedImport("/abs/path.js")).toBe(false);
   });
@@ -63,6 +65,11 @@ describe("findForbiddenCalls", () => {
     const src = "const a = Math.random(); setTimeout(() => {}, 1); Date.now(); requestAnimationFrame(f); setInterval(f, 1); Math.random();";
     expect(findForbiddenCalls(src)).toEqual(["Math.random", "setTimeout", "Date.now", "requestAnimationFrame", "setInterval"]);
     expect(findForbiddenCalls("const t = useTime(); const r = randomSeed;")).toEqual([]);
+  });
+
+  it("finds three.js render loops and the performance clock, but allows seeded randomness", () => {
+    const src = "renderer.setAnimationLoop(draw); const t0 = performance.now(); const v = THREE.MathUtils.seededRandom(3);";
+    expect(findForbiddenCalls(src)).toEqual(["setAnimationLoop", "performance.now"]);
   });
 });
 
@@ -191,8 +198,8 @@ describe("validateAiOutput — helper files", () => {
       "must not contain the entry file",
     );
     expectError(
-      validateAiOutput({ summary: "ok", code: GOOD_LAYER_CODE, files: [{ path: "Card.tsx", content: 'import x from "three";' }] }, layerCtx),
-      'File "Card.tsx" imports disallowed module(s): "three"',
+      validateAiOutput({ summary: "ok", code: GOOD_LAYER_CODE, files: [{ path: "Card.tsx", content: 'import x from "gsap";' }] }, layerCtx),
+      'File "Card.tsx" imports disallowed module(s): "gsap"',
     );
   });
 });

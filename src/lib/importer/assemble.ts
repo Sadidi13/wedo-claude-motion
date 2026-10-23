@@ -8,7 +8,7 @@
  *     (`export default` / Scene / App / …) in `<Stage {...meta}>`, else wraps
  *     static HTML markup, else emits an empty Stage;
  *   - appends `export default` for a Stage-rendering component that has none;
- *   - adds the runtime / React imports the code relies on as globals.
+ *   - adds the runtime / React / three.js imports the code relies on as globals.
  *
  * All changes to the author's code are offset splices; nothing is regenerated.
  */
@@ -19,6 +19,7 @@ import {
   bindsLocal,
   ensureDefaultImport,
   ensureNamedImport,
+  ensureNamespaceImport,
   mergeImports,
   renderImports,
   type MergedImport,
@@ -50,7 +51,7 @@ const ROOT_COMPONENT = "MotionStudioRoot";
 const PREFERRED_ROOTS = ["Scene", "App", "Animation", "Main", "Root"];
 const RUNTIME_EXPORTS = [
   "Stage", "Sprite", "useTime", "useTimeline", "useSprite", "useStage",
-  "Easing", "interpolate", "animate", "clamp", "lerp",
+  "Easing", "interpolate", "animate", "clamp", "lerp", "Three3D",
 ];
 
 interface Edit {
@@ -137,7 +138,7 @@ export function assembleScene(input: AssembleInput): AssembleResult {
   const merge = mergeImports(a.imports);
   for (const source of merge.unsupported) {
     warnings.push(
-      `Import "${source}" cannot be loaded inside Motion Studio (only react, react-dom, lucide-react, the runtime and project files are available)`,
+      `Import "${source}" cannot be loaded inside Motion Studio (only react, react-dom, lucide-react, three, the runtime and project files are available)`,
     );
   }
   const edits: Edit[] = merge.changed
@@ -204,9 +205,10 @@ export function assembleScene(input: AssembleInput): AssembleResult {
 }
 
 /**
- * Add the React / ReactDOM / runtime imports that the code uses as globals
- * (Babel-standalone pages, generated wrappers). JSX needs `React` in scope
- * under the classic runtime, so any JSX counts as a use of `React`.
+ * Add the React / ReactDOM / runtime / three.js imports that the code uses as
+ * globals (Babel-standalone pages with CDN <script> tags, generated wrappers).
+ * JSX needs `React` in scope under the classic runtime, so any JSX counts as a
+ * use of `React`.
  */
 function repairImports(
   code: { body: string; jsx: boolean },
@@ -221,6 +223,7 @@ function repairImports(
   if (!declared("ReactDOM") && usesIdentifier(body, "ReactDOM")) {
     ensureDefaultImport(target, bound, "react-dom/client", "ReactDOM");
   }
+  if (!declared("THREE") && usesIdentifier(body, "THREE")) ensureNamespaceImport(target, bound, "three", "THREE");
   const runtimeNames = RUNTIME_EXPORTS.filter((name) => !declared(name) && usesIdentifier(body, name));
   if (runtimeNames.length) ensureNamedImport(target, bound, RUNTIME_SPECIFIER, runtimeNames);
 

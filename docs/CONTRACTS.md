@@ -67,9 +67,10 @@ Rules (the AI system prompt and the importer both enforce / assume these):
 * `<Sprite start={n} end={n}>` timing props should be numeric literals when the designer is expected
   to retime them from the timeline. Expressions are allowed but shown as read-only.
 * Allowed imports inside a project: `react`, `react-dom`, `react-dom/client`, `lucide-react`,
-  the runtime (`./animations.jsx`, `./animations`, `@motion/runtime`, `motion-runtime`),
-  and relative project files (`./Card.jsx`, `./styles.css`). Anything else fails to load with a
-  clear error.
+  `three` (three.js, pinned to an exact version in `package.json`; the main module only, no
+  `three/addons/…`), the runtime (`./animations.jsx`, `./animations`, `@motion/runtime`,
+  `motion-runtime`), and relative project files (`./Card.jsx`, `./styles.css`). Anything else fails
+  to load with a clear error.
 * Assets are referenced by relative path (`assets/logo.png`); the loader rewrites them to data URLs.
 
 ### Runtime API (`src/runtime/motion.tsx`) — exports
@@ -86,11 +87,80 @@ Rules (the AI system prompt and the importer both enforce / assume these):
 | `interpolate(input:number[], output:number[], easing?)` | `(t:number)=>number` | piecewise linear with clamping; `easing` one fn or one per segment |
 | `animate({ from, to, start, end, ease? })` | `(t:number)=>number` | single tween, default `Easing.easeInOutCubic` |
 | `clamp(v, min, max)`, `lerp(a, b, t)` | helpers | |
+| `Three3D` | `({ setup?, render?, width?, height?, camera?, textures?, antialias=true, autoRender=true, style, ...data-* })` | one three.js scene on one WebGL canvas = **one layer** (`src/runtime/three.tsx`). Renders `<div data-three3d style="position:absolute;left:0;top:0;width;height">` (default size: the Stage) carrying the `data-*` props, with the canvas inside. See "3D scenes" below. |
 
 Globals the runtime installs on `window` when a Stage mounts:
 `__videoMeta = { width, height, duration, fps }`, `__seek(t)`, `__ready = true`,
 `__getLayerRects(): LayerRect[]` (bounding boxes of every `[data-layer-id]` in stage coordinates),
-`__setTransparent(bool)` (toggles the Stage background off for alpha export).
+`__setTransparent(bool)` (toggles the Stage background off for alpha export),
+`__whenIdle(): Promise<void>` (resolves once work the current frame waits for — `<Three3D>` fonts and
+textures — is drawn; `src/runtime/pending.ts`).
+
+### 3D scenes (`<Three3D>`)
+
+A 3D scene is still a pure function of time. `<Three3D>` owns a `WebGLRenderer` (`alpha: true`,
+`preserveDrawingBuffer: true`), a `Scene` and a `PerspectiveCamera` (`camera={{ fov, near, far }}`,
+default 45 / 0.1 / 1000) and never runs a loop:
+
+1. **setup** — once per mount, after web fonts are ready and `textures` (`{ name: url }`, project
+   assets become data URLs) are decoded: `setup({ THREE, scene, camera, renderer, width, height,
+   textures })` builds meshes, lights and materials and returns whatever `render` needs (`state`).
+2. **render** — after every commit, i.e. every time change, in a layout effect (so under `__seek`'s
+   `flushSync` the canvas is drawn before `__seek` returns): `render(t, { …ctx, state, time,
+   localTime, progress })`, then `renderer.render(scene, camera)` unless `autoRender={false}`. It sets
+   every moving property to an absolute value computed from `t`, never `+=`, because frames are
+   rendered out of order and by several workers.
+3. **unmount** — geometries, materials, textures and the renderer are disposed and the WebGL context
+   is released. A lost context or a WebGL-less browser throws into the Stage's error boundary
+   (reported as a preview `error`, and an export failure instead of blank frames).
+
+No `renderer.setAnimationLoop`, `requestAnimationFrame`, `THREE.Clock`, `performance.now()` or
+`Math.random()` (use `THREE.MathUtils.seededRandom(seed)`); animation clips use `mixer.setTime(t)`;
+images come through `textures`, not loaders. The canvas is transparent where nothing is drawn; text and
+titles are ordinary 2D layers above it. Example (a camera dolly through lit boxes, then a title lands):
+
+```jsx
+import React from "react";
+import * as THREE from "three";
+import { Stage, Sprite, Three3D, interpolate, Easing } from "./animations.jsx";
+
+const dolly = interpolate([0, 5], [14, 3], Easing.easeInOutCubic);
+
+export default function Scene() {
+  return (
+    <Stage width={1080} height={1920} duration={6} fps={30} background="#07080d">
+      <Sprite start={0} end={6} data-layer-name="3D boxes">
+        <Three3D
+          setup={({ scene }) => {
+            scene.add(new THREE.HemisphereLight(0xbcd4ff, 0x10131c, 0.8));
+            const key = new THREE.DirectionalLight(0xffffff, 2.4);
+            key.position.set(4, 6, 5);
+            scene.add(key);
+            const boxes = Array.from({ length: 12 }, (_, i) => {
+              const box = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0xff5a36 }));
+              box.position.set(i % 2 ? 1.8 : -1.8, (i % 3) - 1, 2 - i * 1.4);
+              scene.add(box);
+              return box;
+            });
+            return { boxes };
+          }}
+          render={(t, { camera, state }) => {
+            camera.position.set(0, 0.4, dolly(t));
+            camera.lookAt(0, 0, -20);
+            state.boxes.forEach((box, i) => box.rotation.set(t * 0.4 + i, t * 0.6, 0));
+          }}
+        />
+      </Sprite>
+      <Sprite start={3.6} end={6} data-layer-name="Title">
+        {({ progress }) => <h1 style={{ position: "absolute", left: 80, bottom: 360, opacity: progress }}>Into the depth</h1>}
+      </Sprite>
+    </Stage>
+  );
+}
+```
+
+The bundled sample `dolly-3d` (`src/samples/dolly3d.ts`) is the fuller version: fog, an emissive
+accent, a text sign drawn on an `OffscreenCanvas` texture, and 2D title / vignette layers.
 
 Plain-HTML projects (no `<Stage>`): the loader wraps the rendered root in a Stage using the
 project's `meta` so everything above still works.
@@ -125,7 +195,8 @@ export function listLayerIds(source: string): string[];
 Layer naming rule (`LayerNode.name`): `data-layer-name` > for text elements the first 24 chars of text
 > `<Tag>`; Sprite with a single element child may borrow that child's text for the preview.
 `LayerNode.kind`: `Sprite` ⇒ `sprite`; `img|Image|video` ⇒ `image`; `svg|path|circle|rect|...` ⇒ `shape`;
-capitalised tag ⇒ `component`; element whose children are only text/expressions ⇒ `text`;
+`Three3D|canvas` ⇒ `canvas` (one drawn layer: the meshes inside a 3D scene are not layers, and JSX in
+its `setup` / `render` props is a prop value, not a sub-layer); capitalised tag ⇒ `component`; element whose children are only text/expressions ⇒ `text`;
 element with element children ⇒ `group`; else `element`.
 `range` = intersection of own Sprite timing with the nearest ancestor Sprite range; non-Sprite
 elements inherit the parent range; root default is `[0, meta.duration]`.
@@ -159,7 +230,8 @@ export class LoadError extends Error { file?: string }
 Module resolution inside `loadProject`: `react` → the page's React; `react-dom`, `react-dom/client` → a
 shim whose `createRoot(el).render(node)` / `render(node, el)` renders `node` into the mount (so
 Claude's `ReactDOM.createRoot(document.getElementById('root')).render(<App/>)` just works);
-`lucide-react` → real package; runtime aliases (see §1) → `src/runtime/motion.tsx`; relative paths →
+`lucide-react` → real package; `three` → the pinned three.js (the same instance `<Three3D>` uses);
+runtime aliases (see §1) → `src/runtime` (`motion.tsx` + `three.tsx`); relative paths →
 other project files (`.jsx/.js/.tsx/.ts` compiled, `.css` injected as `<style data-file=…>`,
 assets → their data URL string); anything else → `LoadError("Unsupported import 'x' in file y")`.
 The entry file's default export (a component) is rendered; if there is no default export but
@@ -274,10 +346,17 @@ Dark UI, English labels, Tailwind v4, lucide-react icons. Must look like a real 
   new context `viewport = {width, height}` of the stage, `deviceScaleFactor = scale`; goto
   `${origin}/preview?job=<id>&__render=1[&transparent=1]`; wait for `window.__ready === true &&
   typeof window.__seek === "function"`; `document.fonts.ready` + 300ms; for each frame `i` in range:
-  `await page.evaluate(t => new Promise(r => { window.__seek(t); requestAnimationFrame(() =>
-  requestAnimationFrame(r)) }), i/fps)`, then `page.screenshot({ clip, type: transparent ? "png" :
-  "jpeg", quality: 95, omitBackground: transparent })` → `frames/f_%06d.(png|jpg)`. Update
-  `status.json` every 10 frames. Parallel contexts (default 3) each render a contiguous range.
+  `await page.evaluate(t => new Promise(r => { window.__seek(t); (window.__whenIdle?.() ??
+  Promise.resolve()).then(() => requestAnimationFrame(() => requestAnimationFrame(r))) }), i/fps)`,
+  then `page.screenshot({ clip, type: transparent ? "png" : "jpeg", quality: 95, omitBackground:
+  transparent })` → `frames/f_%06d.(png|jpg)`. Update `status.json` every 10 frames. Parallel
+  contexts (default 3) each render a contiguous range.
+* WebGL (`projectUsesWebGL`: a `three` import, `<Three3D>` or a WebGL `getContext`): Chromium also
+  gets `--enable-unsafe-swiftshader`. Headless Chrome draws WebGL on the machine's GPU when it has one
+  (Windows: ANGLE / Direct3D 11) and needs that switch to fall back to SwiftShader on machines without
+  one. `MOTION_STUDIO_WEBGL=swiftshader` forces the software rasteriser (`--use-angle=swiftshader`):
+  slower, the same pixels on every machine. The sandbox stays on. Frames come out identical whatever
+  the worker split (`webgl.integration.test.ts`).
 * ffmpeg (`FFMPEG_PATH` or `ffmpeg`): mp4 `-c:v libx264 -preset slow -crf <q> -pix_fmt yuv420p
   -movflags +faststart`; webm `-c:v libvpx-vp9 -pix_fmt yuva420p -b:v 0 -crf 24` (alpha);
   mov `-c:v prores_ks -profile:v 4444 -pix_fmt yuva444p10le` (alpha); gif two-pass palettegen/
@@ -311,7 +390,8 @@ Samples (`src/samples/index.ts`): `export const samples: { id, name, description
 Ship at least **`product-launch`** (1280×720, 8s, 30fps): gradient background, animated title +
 subtitle, three staggered feature cards with lucide icons, a growing bar chart (4 bars) with value
 labels, logo/CTA outro — every top-level element a named `<Sprite>` so the layers panel looks great.
-Written exactly in the §1 style so it doubles as the reference the AI prompt links to.
+Written exactly in the §1 style so it doubles as the reference the AI prompt links to. Also shipped:
+`lower-third` (alpha overlay) and `dolly-3d` (1080×1920, a `<Three3D>` layer under 2D titles).
 
 ---
 

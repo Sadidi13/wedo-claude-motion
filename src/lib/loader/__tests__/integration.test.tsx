@@ -3,13 +3,15 @@
  * runtime module (what loadProject wires up in the browser), rendered with
  * react-dom/server: a contract-style scene compiles, resolves its imports,
  * and produces the expected stage markup. Covers the sucrase interop path
- * (`import React from "react"`, named runtime imports, side-effect css import).
+ * (`import React from "react"`, named runtime imports, side-effect css import)
+ * and the 3D path (`import * as THREE from "three"` + <Three3D> as one layer).
  */
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 import type { ProjectFile } from "@/lib/types";
-import * as runtime from "@/runtime/motion";
+import * as runtime from "@/runtime";
 import { createModuleSystem } from "../modules";
 import { buildFileTable } from "../resolve";
 import { asEsModule, createReactDomShim } from "../shims";
@@ -55,20 +57,46 @@ const files: Record<string, ProjectFile> = buildFileTable({
   "assets/bg.png": { path: "assets/bg.png", kind: "asset", content: "data:image/png;base64,AA==" },
 });
 
+const SCENE_3D = `
+import React from "react";
+import * as THREE from "three";
+import { Stage, Sprite, Three3D } from "./animations.jsx";
+
+export default function Scene() {
+  return (
+    <Stage width={1080} height={1920} duration={6} fps={30} background="#05060a">
+      <Sprite start={0} end={6} data-layer-id="world" data-layer-name="3D world">
+        <Three3D
+          data-layer-id="three"
+          data-layer-name="Boxes"
+          setup={({ scene }) => { scene.add(new THREE.AmbientLight(0xffffff, 0.4)); return { revision: THREE.REVISION }; }}
+          render={(t, { camera }) => { camera.position.set(0, 1, 8 - t); }}
+        />
+      </Sprite>
+    </Stage>
+  );
+}
+`;
+
+function realSystem(projectFiles: Record<string, ProjectFile>, injectCss = vi.fn()) {
+  return createModuleSystem({
+    files: projectFiles,
+    react: React,
+    injectCss,
+    builtins: {
+      react: asEsModule(React),
+      "react-dom": createReactDomShim(() => {}),
+      "lucide-react": asEsModule({}),
+      three: asEsModule(THREE),
+      runtime: asEsModule(runtime),
+    },
+  });
+}
+
 describe("module system + real runtime", () => {
   it("evaluates a contract-style scene and renders the expected stage markup", () => {
     const injectCss = vi.fn();
-    const system = createModuleSystem({
-      files,
-      react: React,
-      injectCss,
-      builtins: {
-        react: asEsModule(React),
-        "react-dom": createReactDomShim(() => {}),
-        "lucide-react": asEsModule({}),
-        runtime: asEsModule(runtime),
-      },
-    });
+    const system = realSystem(files, injectCss);
     const Scene = (system.load("scene.jsx") as { default: React.ComponentType }).default;
     const html = renderToStaticMarkup(React.createElement(Scene));
 
@@ -82,5 +110,15 @@ describe("module system + real runtime", () => {
     expect(html).not.toContain('data-layer-id="outro"');
     expect(html).not.toContain("Later");
     expect(injectCss).toHaveBeenCalledWith("styles.css", '.bg{background:url("data:image/png;base64,AA==")}');
+  });
+
+  it("loads a three.js scene: <Three3D> is one stage-sized layer element (WebGL starts only in the browser)", () => {
+    const system = realSystem(buildFileTable({ "scene.jsx": { path: "scene.jsx", kind: "jsx", content: SCENE_3D } }));
+    const Scene = (system.load("scene.jsx") as { default: React.ComponentType }).default;
+    const html = renderToStaticMarkup(React.createElement(Scene));
+
+    expect(html).toMatch(/<div data-three3d="" data-layer-id="three" data-layer-name="Boxes" style="[^"]*width:1080px;height:1920px/);
+    // the canvas and renderer are created in a layout effect, which never runs on the server
+    expect(html).not.toContain("<canvas");
   });
 });

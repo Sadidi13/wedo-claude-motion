@@ -4,7 +4,7 @@
  * Naming: `data-layer-name` > the element's own static text (first 24 chars)
  * > a Sprite with a single child layer borrows that child's text > `<Tag>`.
  * Kind: Sprite → sprite; img/Image/video → image; SVG tags → shape;
- * capitalised tag → component; has child layers → group; text / expression
+ * Three3D / canvas → canvas; capitalised tag → component; has child layers → group; text / expression
  * children only → text; empty box-like tag (div/span/section/hr) → shape;
  * anything else → element.
  * Range: a Sprite's literal start/end (absent start = 0, absent end =
@@ -31,6 +31,8 @@ const SHAPE_TAGS = new Set([
   "tspan", "filter", "feGaussianBlur", "feOffset", "feMerge", "feMergeNode", "feColorMatrix",
   "feBlend", "feDropShadow",
 ]);
+/** Drawn surfaces: a three.js scene (runtime <Three3D>) or a plain <canvas>. One layer each. */
+const CANVAS_TAGS = new Set(["Three3D", "canvas"]);
 /** Empty elements of these tags are decorative boxes (backgrounds, dividers). */
 const EMPTY_SHAPE_TAGS = new Set(["div", "span", "section", "hr"]);
 
@@ -199,6 +201,7 @@ function classify(layer: LayerNode, own: OwnContent): LayerKind {
   if (base === "Sprite") return "sprite";
   if (IMAGE_TAGS.has(base)) return "image";
   if (SHAPE_TAGS.has(base)) return "shape";
+  if (CANVAS_TAGS.has(base)) return "canvas";
   if (layer.tag.includes(".") || /^[A-Z]/.test(base)) return "component";
   if (layer.children.length > 0) return "group";
   if (own.text || own.hasExpressions) return "text";

@@ -85,8 +85,10 @@ export default function Scene() {
 
 * Motion is a pure function of time (`useTime`, `useSprite`, `interpolate`, `animate`, `Easing`).
   No CSS transitions/keyframes, timers or randomness.
-* Allowed imports: `react`, `react-dom`, `lucide-react`, the runtime (`./animations.jsx`) and
-  relative project files (`.jsx`, `.css`, assets).
+* Allowed imports: `react`, `react-dom`, `lucide-react`, `three` (pinned; main module only), the
+  runtime (`./animations.jsx`) and relative project files (`.jsx`, `.css`, assets).
+* 3D: the runtime's `<Three3D setup render>` draws a three.js scene as one layer, still a pure
+  function of time (`docs/CONTRACTS.md` §1 "3D scenes", sample `dolly-3d`).
 * Every element inside the Stage gets a stable `data-layer-id` (added automatically).
 
 ## Environment variables
@@ -98,6 +100,7 @@ export default function Scene() {
 | `CHROMIUM_PATH` | browser binary for export (auto-detected when empty) |
 | `FFMPEG_PATH` | ffmpeg binary (bundled `ffmpeg-static` when empty) |
 | `MOTION_STUDIO_JOBS_DIR` | where export jobs are written, default `$TMPDIR/motion-studio/jobs` |
+| `MOTION_STUDIO_WEBGL` | `swiftshader` renders 3D exports with Chrome's software rasteriser (same pixels everywhere, slower); default uses the GPU |
 | `MOTION_STUDIO_BRIDGE_DIR` | Claude Desktop bridge state, default `.motion-bridge/state` in the repo |
 | `MOTION_STUDIO_AUTOPILOT_MODEL` | model for the autopilot (`sonnet` uses less of your plan than the default) |
 | `MOTION_STUDIO_CLAUDE_BIN` | Claude Code binary for the autopilot when `claude` is not on PATH |

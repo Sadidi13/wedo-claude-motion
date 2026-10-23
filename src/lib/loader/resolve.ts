@@ -4,8 +4,9 @@
  *   react                                   -> builtin "react"      (the page's React)
  *   react-dom, react-dom/client             -> builtin "react-dom"  (capture shim)
  *   lucide-react                            -> builtin "lucide-react"
+ *   three                                   -> builtin "three"      (the pinned three.js build)
  *   @motion/runtime, motion-runtime,
- *   ./animations(.jsx|.js|.tsx|.ts)         -> builtin "runtime"    (src/runtime/motion.tsx)
+ *   ./animations(.jsx|.js|.tsx|.ts)         -> builtin "runtime"    (src/runtime: motion + Three3D)
  *   ./relative/path                         -> a project file (extension + index probing)
  *   data:…                                  -> the data URL itself (asset imports after rewriting)
  *   anything else                           -> LoadError
@@ -17,7 +18,7 @@ import type { ProjectFile } from "@/lib/types";
 import { LoadError } from "./errors";
 import { candidatePaths, isRelativeSpecifier, normalisePath, resolveRelative } from "./paths";
 
-export type BuiltinName = "react" | "react-dom" | "lucide-react" | "runtime";
+export type BuiltinName = "react" | "react-dom" | "lucide-react" | "three" | "runtime";
 
 export type Resolution =
   | { kind: "builtin"; name: BuiltinName }
@@ -29,6 +30,7 @@ const BARE_BUILTINS: Record<string, BuiltinName> = {
   "react-dom": "react-dom",
   "react-dom/client": "react-dom",
   "lucide-react": "lucide-react",
+  three: "three",
   "@motion/runtime": "runtime",
   "motion-runtime": "runtime",
 };

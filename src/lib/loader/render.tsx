@@ -4,7 +4,7 @@
  * (CONTRACTS.md §3). Flow:
  *
  *   1. build the module table, evaluate the entry file through the mini
- *      module system (react / react-dom shim / lucide-react / runtime builtins);
+ *      module system (react / react-dom shim / lucide-react / three / runtime builtins);
  *   2. pick the root element: the entry's default export component, or the
  *      node captured from `ReactDOM.createRoot(...).render(...)`;
  *   3. render it into `mount` with the real `createRoot`, inside an error
@@ -19,9 +19,10 @@
 import React, { Component, useLayoutEffect, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import * as lucide from "lucide-react";
+import * as THREE from "three";
 import type { Project, StageMeta } from "@/lib/types";
+import * as runtime from "@/runtime";
 import { motionWindow } from "@/runtime/globals";
-import * as runtime from "@/runtime/motion";
 import { LoadError } from "./errors";
 import { createModuleSystem } from "./modules";
 import { normalisePath } from "./paths";
@@ -168,6 +169,7 @@ export async function loadProject(project: Project, mount: HTMLElement, opts: Lo
         captured = node;
       }),
       "lucide-react": asEsModule(lucide),
+      three: asEsModule(THREE),
       runtime: asEsModule(runtime),
     },
   });

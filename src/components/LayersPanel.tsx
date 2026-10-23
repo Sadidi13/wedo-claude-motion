@@ -19,6 +19,7 @@ import {
   Clapperboard,
   Component,
   Copy,
+  Cuboid,
   Ellipsis,
   Eye,
   EyeOff,
@@ -48,6 +49,7 @@ const KIND_ICON: Record<LayerKind, LucideIcon> = {
   image: ImageIcon,
   shape: Shapes,
   group: Boxes,
+  canvas: Cuboid,
   component: Component,
   element: Box,
 };

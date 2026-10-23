@@ -21,6 +21,8 @@ export interface MotionWindow {
   __ready?: boolean;
   __getLayerRects?: () => LayerRect[];
   __setTransparent?: (transparent: boolean) => void;
+  /** resolves once the frame's pending work (e.g. <Three3D> textures) is drawn; see pending.ts */
+  __whenIdle?: () => Promise<void>;
 }
 
 /** The current window as a MotionWindow, or undefined during SSR. */

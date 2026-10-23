@@ -18,6 +18,10 @@ First public release, under the MIT license.
 - Import Claude Design project archives, standalone HTML and JSX scenes; every element becomes a layer.
 - Layers panel, timeline with draggable Sprite bars, properties, code view, undo and redo.
 - Export to MP4, WebM and MOV with alpha, GIF and PNG sequences, rendered with headless Chromium and ffmpeg.
+- Real 3D: scenes may import `three` (pinned 0.186.1) and draw a three.js world with the runtime's
+  `<Three3D setup render>`, one layer, still a pure function of time. Export waits for its textures,
+  renders WebGL on the GPU (SwiftShader fallback, or `MOTION_STUDIO_WEBGL=swiftshader`), and the
+  `3D dolly` sample shows a camera move through lit boxes under a 2D title.
 
 ### Working with Claude, no API key needed
 - **Claude Code sessions** create and edit scenes with `scripts/motion-bridge.mjs` and the

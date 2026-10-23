@@ -53,8 +53,25 @@ describe("mergeImports", () => {
     expect(normaliseImportSource("animations.jsx")).toEqual({ source: "./animations.jsx", supported: true });
     expect(normaliseImportSource("@motion/runtime")).toEqual({ source: "./animations.jsx", supported: true });
     expect(normaliseImportSource("./Card.jsx")).toEqual({ source: "./Card.jsx", supported: true });
-    expect(normaliseImportSource("three")).toEqual({ source: "three", supported: false });
-    expect(normaliseImportSource("https://esm.sh/three")).toEqual({ source: "https://esm.sh/three", supported: false });
+    expect(normaliseImportSource("framer-motion")).toEqual({ source: "framer-motion", supported: false });
+    expect(normaliseImportSource("https://esm.sh/gsap")).toEqual({ source: "https://esm.sh/gsap", supported: false });
+  });
+
+  it("provides three.js (bare and from CDNs) but not its addons", () => {
+    expect(normaliseImportSource("three")).toEqual({ source: "three", supported: true });
+    for (const url of [
+      "https://esm.sh/three",
+      "https://esm.sh/three@0.186.1",
+      "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js",
+      "https://cdn.jsdelivr.net/npm/three@0.170.0/+esm",
+    ]) {
+      expect(normaliseImportSource(url)).toEqual({ source: "three", supported: true });
+    }
+    expect(normaliseImportSource("three/addons/controls/OrbitControls.js")).toMatchObject({ supported: false });
+    expect(normaliseImportSource("https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js")).toMatchObject({
+      supported: false,
+    });
   });
 
   it("merges duplicate modules, drops re-bound locals and leaves clean files untouched", () => {
@@ -132,6 +149,46 @@ describe("assembleScene", () => {
     const out = assembleScene({ code: "const = ;", cssImports: ["./a.css"], fallbackMeta: meta });
     expect(out.source).toBe('import "./a.css";\nconst = ;\n');
     expect(out.warnings[0]).toMatch(/could not be parsed/);
+  });
+
+  it("imports three.js and Three3D for code that uses them as globals (CDN script pages)", () => {
+    const out = assembleScene({
+      code: [
+        "function Scene() {",
+        "  return (",
+        "    <Stage width={2} height={2} duration={1} fps={1}>",
+        "      <Three3D setup={({ scene }) => scene.add(new THREE.AmbientLight())} />",
+        "    </Stage>",
+        "  );",
+        "}",
+      ].join("\n"),
+      cssImports: [],
+      fallbackMeta: meta,
+    });
+    expect(out.source.split("\n").slice(0, 3)).toEqual([
+      'import React from "react";',
+      'import * as THREE from "three";',
+      'import { Stage, Three3D } from "./animations.jsx";',
+    ]);
+    expect(out.warnings).toEqual([]);
+    expect(parseScene(out.source).layers.map((l) => l.kind)).toEqual(["canvas"]);
+  });
+
+  it("keeps a module scene's own three import and warns about three.js addons", () => {
+    const code = [
+      'import React from "react";',
+      'import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";',
+      'import { OrbitControls } from "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js";',
+      'import { Stage } from "./animations.jsx";',
+      "export default function Scene() { return <Stage width={2} height={2} duration={1} fps={1} />; }",
+    ].join("\n");
+    const out = assembleScene({ code, cssImports: [], fallbackMeta: meta });
+    expect(out.source).toContain('import * as THREE from "three";');
+    expect(out.source.match(/from "three"/g)).toHaveLength(1);
+    expect(out.warnings).toEqual([
+      expect.stringContaining('Import "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js" cannot be loaded'),
+    ]);
+    expect(out.warnings[0]).toContain("only react, react-dom, lucide-react, three, the runtime");
   });
 
   it("warns about scenes that ship their own Stage implementation", () => {
