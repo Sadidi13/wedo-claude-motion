@@ -21,6 +21,15 @@ export interface PendingBridgeRequest {
 export const RECENT_LISTENER_MS = 90_000;
 
 interface BridgeState {
+  /**
+   * Whether this tab is the one Claude works with. Only one editor tab per browser shares its project
+   * and applies Claude's scenes and edits; null until the election settled.
+   */
+  isLeader: boolean | null;
+  setLeader(isLeader: boolean): void;
+  /** Make this tab the one Claude works with (set by useBridgeSync while it is mounted). */
+  takeOver: (() => void) | null;
+  setTakeOver(takeOver: (() => void) | null): void;
   status: BridgeStatus | null;
   /** the listener polled within RECENT_LISTENER_MS (computed when the status arrives) */
   recentlyActive: boolean;
@@ -32,6 +41,10 @@ interface BridgeState {
 }
 
 export const useBridgeStore = create<BridgeState>()((set) => ({
+  isLeader: null,
+  setLeader: (isLeader) => set({ isLeader }),
+  takeOver: null,
+  setTakeOver: (takeOver) => set({ takeOver }),
   status: null,
   recentlyActive: false,
   unreachable: false,

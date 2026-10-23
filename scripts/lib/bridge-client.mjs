@@ -4,20 +4,34 @@
  * dependencies. Reads the access token from the bridge state folder, which the
  * server creates on first use.
  *
- * Environment: MOTION_STUDIO_URL (default http://localhost:3000),
- * MOTION_STUDIO_BRIDGE_DIR (default <repo>/.motion-bridge/state, same as the server).
+ * Finding the server: MOTION_STUDIO_URL when set; otherwise the port the server recorded in
+ * <bridge state>/server.json, then ports 3000-3005 (where `next dev` lands when 3000 is taken).
+ * A candidate only counts when its /api/bridge/status reports this checkout's instance id.
+ *
+ * Environment: MOTION_STUDIO_URL, MOTION_STUDIO_BRIDGE_DIR (default <repo>/.motion-bridge/state,
+ * same as the server).
  */
 import { spawn } from "node:child_process";
-import { mkdirSync, openSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, openSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const SCRATCH = path.join(REPO, ".motion-bridge");
-export const BASE = (process.env.MOTION_STUDIO_URL || "http://localhost:3000").replace(/\/+$/, "");
 export const BRIDGE_DIR = process.env.MOTION_STUDIO_BRIDGE_DIR || path.join(SCRATCH, "state");
 const TOKEN_HEADER = "x-motion-bridge-token";
+const DEFAULT_PORT = 3000;
+const FALLBACK_PORTS = [3000, 3001, 3002, 3003, 3004, 3005];
+const FIXED_URL = process.env.MOTION_STUDIO_URL ? process.env.MOTION_STUDIO_URL.replace(/\/+$/, "") : null;
+
+/**
+ * The editor's address. A live binding: it starts at the recorded or default port and is updated
+ * when resolveBase() finds the server somewhere else. Always "localhost" (not 127.0.0.1), because the
+ * editor's autosaves live in the browser storage of the localhost origin.
+ */
+export let BASE = FIXED_URL ?? `http://localhost:${recordedPort() ?? DEFAULT_PORT}`;
 
 /** The token must never travel in clear text to another machine. */
 function assertSafeBase(base) {
@@ -28,6 +42,58 @@ function assertSafeBase(base) {
   }
 }
 assertSafeBase(BASE);
+
+/** Same id the server computes from its bridge folder (src/lib/server/bridge/server-info.ts). */
+export const INSTANCE_ID = (() => {
+  const resolved = path.resolve(BRIDGE_DIR);
+  const normalised = process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  return createHash("sha256").update(normalised).digest("hex").slice(0, 16);
+})();
+
+function recordedPort() {
+  try {
+    const info = JSON.parse(readFileSync(path.join(BRIDGE_DIR, "server.json"), "utf8"));
+    return Number.isInteger(info?.port) && info.port > 0 ? info.port : null;
+  } catch {
+    return null;
+  }
+}
+
+/** True when `base` answers with this checkout's bridge status (no token is sent while probing). */
+async function isOurServer(base) {
+  try {
+    const response = await fetch(`${base}/api/bridge/status`, { signal: AbortSignal.timeout(2000) });
+    if (!response.ok) return false;
+    const status = await response.json();
+    return status?.instance === INSTANCE_ID;
+  } catch {
+    return false;
+  }
+}
+
+let confirmedBase = null;
+
+/**
+ * Find this checkout's server and point BASE at it. Returns the address, or null when no server of
+ * ours answers (BASE then keeps the recorded or default address, used to start one).
+ */
+export async function resolveBase({ refresh = false } = {}) {
+  if (FIXED_URL) return FIXED_URL;
+  if (confirmedBase && !refresh) return confirmedBase;
+  confirmedBase = null;
+  const recorded = recordedPort();
+  const ports = [...new Set([...(recorded ? [recorded] : []), ...FALLBACK_PORTS])];
+  for (const port of ports) {
+    const base = `http://localhost:${port}`;
+    if (await isOurServer(base)) {
+      confirmedBase = base;
+      BASE = base;
+      return base;
+    }
+  }
+  BASE = `http://localhost:${recorded ?? DEFAULT_PORT}`;
+  return null;
+}
 
 /** Something the user or Claude can act on: server down, no token, bad id, … */
 export class BridgeError extends Error {
@@ -56,6 +122,9 @@ async function readToken() {
 
 /** Raw request: `{ status, json, text }`. Throws BridgeError only when the server is unreachable. */
 export async function request(method, route, { body, auth = false, signal } = {}) {
+  if (!(await resolveBase())) {
+    throw new BridgeError(`WeDo Claude Motion is not running (looked at ${BASE} and ports 3000-3005). Start it with "pnpm dev" in ${REPO}.`);
+  }
   const send = async (token) => {
     const headers = {};
     if (body !== undefined) headers["content-type"] = "application/json";
@@ -70,8 +139,9 @@ export async function request(method, route, { body, auth = false, signal } = {}
       });
     } catch (error) {
       if (error?.name === "AbortError") throw error;
+      confirmedBase = null; // the server went away: look for it again next time
       throw new BridgeError(
-        `Motion Studio is not running at ${BASE} (${error?.cause?.code ?? error?.message}). Start it with "pnpm dev" in ${REPO}.`,
+        `WeDo Claude Motion is not running at ${BASE} (${error?.cause?.code ?? error?.message}). Start it with "pnpm dev" in ${REPO}.`,
       );
     }
     const text = await response.text();

@@ -10,7 +10,7 @@ where claude >nul 2>&1
 if errorlevel 1 (set "CLAUDE_BIN=%USERPROFILE%\.local\bin\claude.exe") else (set "CLAUDE_BIN=claude")
 if defined MOTION_STUDIO_CLAUDE_BIN set "CLAUDE_BIN=%MOTION_STUDIO_CLAUDE_BIN%"
 
-powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://localhost:3000/api/bridge/status | Out-Null } catch { exit 1 }"
+call node scripts\motion-bridge.mjs status >nul 2>&1
 if errorlevel 1 (
   echo   Starting Motion Studio in its own window ^(keep that window open^)...
   start "Motion Studio - pnpm dev" /d "%cd%" cmd /k pnpm dev

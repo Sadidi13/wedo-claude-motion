@@ -258,6 +258,8 @@ export interface BridgeStatus {
   listenerClient: BridgeClient | null;
   /** an editor tab polled for events within the last few seconds */
   editorOpen: boolean;
+  /** id of the bridge state folder this server uses (added by the status route; tools match it) */
+  instance?: string;
   /** requests waiting to be claimed */
   pending: number;
   /** the project the editor last shared with the server */

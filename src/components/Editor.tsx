@@ -14,6 +14,7 @@ import { useEditorHotkeys } from "./hooks/useEditorHotkeys";
 import { ImportDialog } from "./ImportDialog";
 import { Inspector, type InspectorTab } from "./Inspector";
 import { LayersPanel } from "./LayersPanel";
+import { SecondTabBanner } from "./SecondTabBanner";
 import { Timeline } from "./Timeline";
 import { TopBar } from "./TopBar";
 
@@ -84,6 +85,7 @@ export default function Editor() {
       </div>
       {dialog === "import" && <ImportDialog onClose={closeDialog} />}
       {dialog === "export" && <ExportDialog onClose={closeDialog} />}
+      <SecondTabBanner />
     </div>
   );
 }

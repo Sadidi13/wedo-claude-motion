@@ -27,7 +27,7 @@ call node scripts\motion-bridge.mjs install-chat
 if errorlevel 1 goto failed
 
 echo.
-powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://localhost:3000/api/bridge/status | Out-Null } catch { exit 1 }"
+call node scripts\motion-bridge.mjs status >nul 2>&1
 if errorlevel 1 (
   echo   Starting Motion Studio in its own window ^(keep that window open^)...
   start "Motion Studio - pnpm dev" /d "%cd%" cmd /k pnpm dev

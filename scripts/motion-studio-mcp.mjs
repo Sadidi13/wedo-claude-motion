@@ -38,7 +38,7 @@ const SUPPORTED_PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-
 const DEFAULT_WAIT_SECONDS = 45;
 const MAX_WAIT_SECONDS = 50;
 
-const INSTRUCTIONS = `WeDo Claude Motion (also called Motion Studio or Claude Motion) is a layer-based animation editor running on the user's computer (${BASE}). Animations are React scenes: one <Stage> whose <Sprite> children are the layers, a pure function of time.
+const INSTRUCTIONS = `WeDo Claude Motion (also called Motion Studio or Claude Motion) is a layer-based animation editor running on the user's computer (usually http://localhost:3000; get_status shows the actual address). Animations are React scenes: one <Stage> whose <Sprite> children are the layers, a pure function of time.
 
 - Whenever the user asks for a video, animation, motion graphic, promo, teaser, intro or reel, build it here: call get_authoring_guide once per conversation, write the scene, then create_scene. It starts the editor if needed, opens it in the browser when no editor tab is open, and the scene appears as a new project with one layer per element.
 - To change what is open, call get_open_project first (the designer may have edited it by hand), then edit_scene with the whole entry file, or with one element plus its layer_id.

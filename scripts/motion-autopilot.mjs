@@ -20,7 +20,7 @@ import { existsSync, rmSync } from "node:fs";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { BASE, BridgeError, BridgeValidationError, answer, claim, decline, getContract, sleep } from "./lib/bridge-client.mjs";
+import { BASE, BridgeError, BridgeValidationError, answer, claim, decline, getContract, resolveBase, sleep } from "./lib/bridge-client.mjs";
 
 const RUN_TIMEOUT_MS = 10 * 60_000;
 const POLL_MS = 1_000;
@@ -212,8 +212,9 @@ async function main() {
   const flags = parseFlags(process.argv.slice(2));
   const model = flags.model ?? process.env.MOTION_STUDIO_AUTOPILOT_MODEL;
   const bin = claudeCommand();
-  console.log("Motion Studio autopilot  ·  اتوپایلوت موشن استودیو");
-  console.log(`  editor:  ${BASE}`);
+  console.log("WeDo Claude Motion autopilot  ·  اتوپایلوت");
+  const found = await resolveBase();
+  console.log(`  editor:  ${BASE}${found ? "" : "  (not running yet; waiting for it)"}`);
   console.log(`  claude:  ${bin}${model ? `  (model ${model})` : ""}`);
 
   const login = checkLogin(bin);
