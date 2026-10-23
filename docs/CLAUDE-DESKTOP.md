@@ -146,6 +146,22 @@ below, so no skill is needed in the chat.
 | `POST /api/bridge/events` | CLI, token | push `{ type: "project", name, … }` or `{ type: "edit", layerId?, … }` |
 | `GET /api/bridge/contract` | CLI | the authoring contract (the API system prompt) |
 
+## Finding the server, and one editor tab
+
+- **Port.** `next dev` moves to 3001, 3002, … when 3000 is taken, and `--port` changes it too. At
+  startup (`src/instrumentation.ts`) and on every status request the server writes
+  `<bridge state>/server.json` with its port and an *instance id* derived from its bridge folder.
+  The CLI, the connector, the autopilot and the Windows helpers read that port, then try 3000-3005,
+  and only accept a server whose `/api/bridge/status` reports their own instance id. So they never
+  talk to, or send their token to, another app or another copy of the project. `MOTION_STUDIO_URL`
+  still overrides all of this. The editor is always opened on `localhost` (not 127.0.0.1), where its
+  autosaves live.
+- **Tabs.** Editor tabs elect a leader with the Web Locks API (`wedo-claude-motion:editor-leader`).
+  Only the leading tab shares its project, polls Claude's events and counts as "editor open". Other
+  tabs show a bar with **Use this tab**, which steals the lock; when the leading tab closes, the next
+  one takes over. A tab opened by Claude with `?event=` takes over at once. Answers to Ask Claude
+  requests still go to the tab that sent them.
+
 ## Opening the editor and the next-step note
 
 `create_scene` / `edit_scene` (chat) and `new` / `edit` (CLI) start `pnpm dev` when the server does

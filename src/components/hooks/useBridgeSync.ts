@@ -173,6 +173,16 @@ export function useBridgeSync(): void {
           onLeadershipChange(false);
           requestLeadership(false); // wait for our turn: the leading tab closes or hands over
         });
+      if (!steal) {
+        // A queued request does not say it is waiting: when another tab holds the lock, this tab follows.
+        void locks
+          .query()
+          .then(({ held }) => {
+            if (disposed || id !== activeRequest || useBridgeStore.getState().isLeader === true) return;
+            if (held?.some((lock) => lock.name === LEADER_LOCK)) onLeadershipChange(false);
+          })
+          .catch(() => undefined);
+      }
     };
     useBridgeStore.getState().setTakeOver(() => requestLeadership(true));
 
