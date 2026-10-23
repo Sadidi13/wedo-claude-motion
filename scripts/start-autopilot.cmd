@@ -13,7 +13,7 @@ if defined MOTION_STUDIO_CLAUDE_BIN set "CLAUDE_BIN=%MOTION_STUDIO_CLAUDE_BIN%"
 call node scripts\motion-bridge.mjs status >nul 2>&1
 if errorlevel 1 (
   echo   Starting Motion Studio in its own window ^(keep that window open^)...
-  start "Motion Studio - pnpm dev" /d "%cd%" cmd /k pnpm dev
+  start "WeDo Claude Motion server - close this window to stop" /min /d "%cd%" cmd /k pnpm dev
   echo.
 )
 

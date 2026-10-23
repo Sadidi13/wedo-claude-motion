@@ -5,6 +5,8 @@
  * MCP connector in scripts/motion-studio-mcp.mjs instead (`install-chat` sets it up).
  * Design: docs/CLAUDE-DESKTOP.md. No dependencies.
  *
+ *   start [--no-open] [--wait <s>] start the editor's server if needed and open the editor
+ *   open [--wait <s>]              open the editor in the browser (waiting for a starting server)
  *   status                         is the server up, is anyone listening, what is open
  *   contract                       write the authoring contract to .motion-bridge/contract.md
  *   project                        write the open project to .motion-bridge/project/
@@ -35,16 +37,22 @@ import {
   answer,
   claim,
   decline,
+  editorUrl,
   ensureServer,
   getContract,
   getProject,
   getStatus,
   push,
+  openInBrowser,
   showInEditor,
   sleep,
+  tryStatus,
 } from "./lib/bridge-client.mjs";
 
 class CliError extends Error {}
+
+/** Flags that take no value. */
+const BOOLEAN_FLAGS = new Set(["force", "no-open"]);
 
 function parseArgs(argv) {
   const positional = [];
@@ -56,6 +64,10 @@ function parseArgs(argv) {
       continue;
     }
     const [key, inline] = arg.slice(2).split(/=(.*)/s, 2);
+    if (BOOLEAN_FLAGS.has(key) && inline === undefined) {
+      flags[key] = true;
+      continue;
+    }
     const value = inline ?? argv[++i];
     if (value === undefined) throw new CliError(`--${key} needs a value`);
     if (key === "file") flags.file.push(value);
@@ -322,7 +334,32 @@ async function cmdInstallChat(flags) {
   console.log("Open Claude Desktop now; the connector loads when it starts.");
 }
 
+/** Start the editor's server when it is not running, then open the editor (unless --no-open). */
+async function cmdStart(flags) {
+  const { status, started } = await ensureServer({ timeoutSeconds: Number(flags.wait ?? 180) });
+  console.log(started ? `Started WeDo Claude Motion at ${BASE}.` : `WeDo Claude Motion is running at ${BASE}.`);
+  if (!flags["no-open"] && !status.editorOpen) {
+    openInBrowser(editorUrl(undefined, { lead: true }));
+    console.log("Opened the editor in your browser.");
+  }
+}
+
+/** Open the editor in the browser; with --wait <seconds>, wait for a server that is still starting. */
+async function cmdOpen(flags) {
+  const deadline = Date.now() + Number(flags.wait ?? 0) * 1000;
+  let status = await tryStatus();
+  while (!status && Date.now() < deadline) {
+    await sleep(1500);
+    status = await tryStatus();
+  }
+  if (!status) throw new CliError(`WeDo Claude Motion is not running. Start it with scripts\\start.cmd (Windows) or "pnpm dev".`);
+  openInBrowser(editorUrl(undefined, { lead: true }));
+  console.log(`Opened ${BASE} in your browser.`);
+}
+
 const COMMANDS = {
+  start: (_positional, flags) => cmdStart(flags),
+  open: (_positional, flags) => cmdOpen(flags),
   status: () => cmdStatus(),
   contract: () => cmdContract(),
   project: () => cmdProject(),

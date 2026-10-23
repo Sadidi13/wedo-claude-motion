@@ -276,8 +276,9 @@ export async function ensureServer({ timeoutSeconds = 90 } = {}) {
 }
 
 /** The editor's URL; with an event id the freshly opened tab applies that scene or edit. */
-export function editorUrl(eventId) {
-  return eventId && EVENT_ID.test(eventId) ? `${BASE}/?event=${eventId}` : `${BASE}/`;
+export function editorUrl(eventId, { lead = false } = {}) {
+  if (eventId && EVENT_ID.test(eventId)) return `${BASE}/?event=${eventId}`;
+  return lead ? `${BASE}/?lead=1` : `${BASE}/`;
 }
 
 /** Open a URL built by editorUrl() in the default browser (never a URL taken from user text). */

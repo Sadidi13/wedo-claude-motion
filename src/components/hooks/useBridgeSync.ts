@@ -28,6 +28,8 @@ const EVENT_ID = /^[0-9a-z]{15}$/;
 const LEADER_LOCK = "wedo-claude-motion:editor-leader";
 /** Events applied from the URL; module-level so React's double-run of effects in development cannot apply one twice. */
 const appliedFromUrl = new Set<string>();
+/** ?lead=1 read once per page load (module-level for the same reason). */
+let leadFromUrl: boolean | null = null;
 
 async function getJson<T>(url: string): Promise<{ status: number; body: T | null }> {
   const response = await fetch(url, { cache: "no-store" });
@@ -187,9 +189,19 @@ export function useBridgeSync(): void {
     useBridgeStore.getState().setTakeOver(() => requestLeadership(true));
 
     // 3b. Opened by Claude with ?event=<id> (no editor tab was open): this tab leads and applies it once.
-    const opened = new URLSearchParams(window.location.search).get("event");
+    //     Opened by the start / open command with ?lead=1: the user is looking at this tab, so it leads.
+    const params = new URLSearchParams(window.location.search);
+    const opened = params.get("event");
     const openedByClaude = opened !== null && EVENT_ID.test(opened) && !appliedFromUrl.has(opened);
-    requestLeadership(openedByClaude);
+    if (leadFromUrl === null) {
+      leadFromUrl = params.get("lead") === "1";
+      if (leadFromUrl) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("lead");
+        window.history.replaceState(null, "", url.toString());
+      }
+    }
+    requestLeadership(openedByClaude || leadFromUrl);
     if (openedByClaude) {
       void getJson<BridgeEvent>(`/api/bridge/events/${opened}`)
         .then(({ status, body }) => {
