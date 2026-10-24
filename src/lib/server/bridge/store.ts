@@ -16,11 +16,12 @@
  *
  * Ids are time-ordered ([0-9a-z], lexicographic order = creation order), so
  * "next pending request" and "events after cursor" are a sorted directory
- * listing. Writes are atomic (temp file + rename, retried on Windows locks).
+ * listing. Writes go through ../jsonFile.ts: temp file + rename, or in place while Windows keeps
+ * a polled file locked (readers retry a half-written one).
  */
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { customAlphabet } from "nanoid";
 import type {
@@ -34,6 +35,7 @@ import type {
   BridgeStatus,
   Project,
 } from "@/lib/types";
+import { readJsonFile, writeJsonFile } from "../jsonFile";
 
 /** A listener that polled within this window counts as "listening". */
 export const LISTENER_TTL_MS = 5_000;
@@ -106,35 +108,13 @@ function requestFile(id: string): string {
   return path.join(requestsDir(), `${id}.json`);
 }
 
-export async function readJson<T>(file: string): Promise<T | null> {
-  try {
-    return JSON.parse(await readFile(file, "utf8")) as T;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
+export function readJson<T>(file: string): Promise<T | null> {
+  return readJsonFile<T>(file);
 }
-
-const RETRYABLE_RENAME = new Set(["EPERM", "EBUSY", "EACCES"]);
 
 export async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.${randomSuffix()}.tmp`;
-  await writeFile(tmp, JSON.stringify(value), "utf8");
-  // Windows refuses to replace a file another handle is reading; the readers are quick.
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await rename(tmp, file);
-      return;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code ?? "";
-      if (attempt >= 5 || !RETRYABLE_RENAME.has(code)) {
-        await rm(tmp, { force: true });
-        throw error;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)));
-    }
-  }
+  await writeJsonFile(file, value);
 }
 
 export async function listIds(dir: string): Promise<string[]> {

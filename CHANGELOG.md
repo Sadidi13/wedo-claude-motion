@@ -27,8 +27,9 @@ First public release, under the MIT license.
   the Sprite's local time, so GSAP scrubs and exports frame-exactly; GSAP's own clock is stopped.
   `Kinetic type (GSAP)` sample. GSAP is under GreenSock / Webflow's "Standard No Charge" license,
   not MIT.
-- Export: status writes retry when Windows briefly locks `status.json` during a status poll (an
-  export could fail with `EPERM`).
+- Export and bridge state: when Windows keeps a polled JSON file locked (`status.json` during a
+  status poll), the write falls back to rewriting it in place instead of failing with `EPERM`, and
+  readers retry a file caught half written (`src/lib/server/jsonFile.ts`).
 
 ### Storyboard first
 - Every new video starts with 3 style frames to choose from, then a storyboard of shots in the

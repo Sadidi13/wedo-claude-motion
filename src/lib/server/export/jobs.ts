@@ -9,16 +9,18 @@
  *   output.<ext>   the encoded file served by `/download`
  *
  * Job ids are nanoid strings over [a-z0-9]; `jobDir` refuses anything else so a
- * request can never reach outside the jobs root. Status writes are atomic
- * (temp file + rename, retried on Windows locks) and serialised per job so
- * parallel render workers cannot clobber each other's read-modify-write.
+ * request can never reach outside the jobs root. Status writes go through
+ * ../jsonFile.ts (temp file + rename, which survives Windows locking the file
+ * during a status poll) and are serialised per job so parallel render workers
+ * cannot clobber each other's read-modify-write.
  */
 
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { customAlphabet } from "nanoid";
 import type { ExportJobStatus, ExportOptions, Project } from "@/lib/types";
+import { readJsonFile, writeJsonFile } from "../jsonFile";
 import { resolvePlan } from "./plan";
 import { EXPORT_LIMITS, ExportRequestError, parseExportRequest } from "./schema";
 
@@ -38,39 +40,6 @@ export function jobsRoot(): string {
 export function jobDir(jobId: string): string {
   if (!isValidJobId(jobId)) throw new Error(`Invalid export job id "${jobId}"`);
   return path.join(jobsRoot(), jobId);
-}
-
-async function readJson<T>(file: string): Promise<T | null> {
-  try {
-    return JSON.parse(await readFile(file, "utf8")) as T;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-}
-
-const RETRYABLE_RENAME = new Set(["EPERM", "EBUSY", "EACCES"]);
-/** Rename retries on Windows: every 10 ms for up to half a second (a blocked rename clears within ~30 ms). */
-const RENAME_ATTEMPTS = 50;
-const RENAME_RETRY_MS = 10;
-
-async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmp, JSON.stringify(value), "utf8");
-  // Windows refuses to replace a file another handle is reading (the status poll); readers are quick.
-  for (let attempt = 1; ; attempt++) {
-    try {
-      await rename(tmp, file);
-      return;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code ?? "";
-      if (attempt >= RENAME_ATTEMPTS || !RETRYABLE_RENAME.has(code)) {
-        await rm(tmp, { force: true });
-        throw error;
-      }
-      await new Promise((resolve) => setTimeout(resolve, RENAME_RETRY_MS));
-    }
-  }
 }
 
 /**
@@ -97,9 +66,9 @@ export async function createJob(request: unknown): Promise<{ jobId: string; dir:
     startedAt: new Date().toISOString(),
   };
   await Promise.all([
-    writeJsonAtomic(path.join(dir, "project.json"), project),
-    writeJsonAtomic(path.join(dir, "options.json"), options),
-    writeJsonAtomic(path.join(dir, "status.json"), status),
+    writeJsonFile(path.join(dir, "project.json"), project),
+    writeJsonFile(path.join(dir, "options.json"), options),
+    writeJsonFile(path.join(dir, "status.json"), status),
   ]);
   return { jobId, dir };
 }
@@ -122,15 +91,15 @@ export async function pruneOldJobs(now = Date.now()): Promise<number> {
 }
 
 export function readStatus(jobId: string): Promise<ExportJobStatus | null> {
-  return readJson<ExportJobStatus>(path.join(jobDir(jobId), "status.json"));
+  return readJsonFile<ExportJobStatus>(path.join(jobDir(jobId), "status.json"));
 }
 
 export function readProject(jobId: string): Promise<Project | null> {
-  return readJson<Project>(path.join(jobDir(jobId), "project.json"));
+  return readJsonFile<Project>(path.join(jobDir(jobId), "project.json"));
 }
 
 export function readOptions(jobId: string): Promise<ExportOptions | null> {
-  return readJson<ExportOptions>(path.join(jobDir(jobId), "options.json"));
+  return readJsonFile<ExportOptions>(path.join(jobDir(jobId), "options.json"));
 }
 
 // Per-job write queue: merges are read-modify-write, so they must not interleave.
@@ -143,10 +112,10 @@ export function writeStatus(jobId: string, patch: Partial<ExportJobStatus>): Pro
   const next = previous
     .catch(() => undefined) // a failed earlier write must not poison the queue
     .then(async () => {
-      const current = await readJson<ExportJobStatus>(file);
+      const current = await readJsonFile<ExportJobStatus>(file);
       if (!current) throw new Error(`Export job "${jobId}" does not exist`);
       const merged: ExportJobStatus = { ...current, ...patch, jobId };
-      await writeJsonAtomic(file, merged);
+      await writeJsonFile(file, merged);
       return merged;
     });
   statusQueues.set(jobId, next);
