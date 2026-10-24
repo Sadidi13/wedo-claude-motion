@@ -9,6 +9,12 @@
  * every other answer; an invalid one gets one retry with the error, then the
  * request is declined with the reason.
  *
+ * Storyboard steps (docs/STORYBOARD.md) are handled the same way: a new video
+ * from the editor gets style frames, the designer's choice gets a storyboard,
+ * the approval gets the built video, each as one Claude Code run. A built
+ * video then goes through the local quality check (docs/QUALITY.md); when it
+ * finds real errors, one more run fixes them.
+ *
  *   node scripts/motion-autopilot.mjs [--model <alias>] [--once]
  *
  * Environment: MOTION_STUDIO_CLAUDE_BIN (default: `claude` on PATH, then
@@ -17,10 +23,26 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { BASE, BridgeError, BridgeValidationError, answer, claim, decline, getContract, resolveBase, sleep } from "./lib/bridge-client.mjs";
+import {
+  BASE,
+  BridgeError,
+  BridgeValidationError,
+  answer,
+  boardReferenceFiles,
+  checkQuality,
+  claim,
+  decline,
+  getContract,
+  getProject,
+  proposeStoryboard,
+  proposeStyles,
+  push,
+  resolveBase,
+  sleep,
+} from "./lib/bridge-client.mjs";
 
 const RUN_TIMEOUT_MS = 10 * 60_000;
 const POLL_MS = 1_000;
@@ -90,13 +112,36 @@ function checkLogin(bin) {
   }
 }
 
-/** One `claude -p` run. Resolves with the model's text; rejects with a readable message. */
-function runClaude(bin, prompt, model) {
+/** The final "result" event of Claude Code's output: one JSON object, or the last result line of a stream. */
+function readResult(stdout, streaming) {
+  if (!streaming) return JSON.parse(stdout);
+  let result = null;
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const event = JSON.parse(line);
+      if (event?.type === "result") result = event;
+    } catch {
+      // not an event line
+    }
+  }
+  if (!result) throw new Error("no result event");
+  return result;
+}
+
+/**
+ * One `claude -p` run. Resolves with the model's text; rejects with a readable message. With
+ * `images` (base64 JPEGs: a storyboard's reference previews) the prompt goes in as one stream-json
+ * user message holding the text and the images.
+ */
+function runClaude(bin, prompt, model, images = []) {
+  const streaming = images.length > 0;
   // No tools, no MCP servers, no settings/hooks/CLAUDE.md, no saved session: a request can only produce text.
   const args = [
     "-p",
     "--output-format",
-    "json",
+    streaming ? "stream-json" : "json",
+    ...(streaming ? ["--input-format", "stream-json", "--verbose"] : []),
     "--system-prompt-file",
     CONTRACT_FILE,
     "--tools",
@@ -125,7 +170,7 @@ function runClaude(bin, prompt, model) {
       clearTimeout(timer);
       let result;
       try {
-        result = JSON.parse(stdout);
+        result = readResult(stdout, streaming);
       } catch {
         const detail = (stderr || stdout).trim().split(/\r?\n/).slice(-5).join(" ");
         reject(new Error(`Claude Code exited with code ${code}: ${detail || "no output"}`));
@@ -137,12 +182,20 @@ function runClaude(bin, prompt, model) {
       }
       resolve({ text: String(result.result ?? ""), seconds: Math.round((result.duration_ms ?? 0) / 1000) });
     });
-    child.stdin.end(prompt, "utf8");
+    if (!streaming) {
+      child.stdin.end(prompt, "utf8");
+      return;
+    }
+    const content = [
+      { type: "text", text: prompt },
+      ...images.map((data) => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data } })),
+    ];
+    child.stdin.end(`${JSON.stringify({ type: "user", message: { role: "user", content } })}\n`, "utf8");
   });
 }
 
-/** `{ summary, code, files? }` or `{ error }` from the model's reply text. */
-function parseReply(text) {
+/** The JSON object in the model's reply text (fences and stray prose around it are tolerated). */
+function parseJsonObject(text) {
   let body = text.trim();
   const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n?```$/.exec(body);
   if (fenced) body = fenced[1].trim();
@@ -151,12 +204,18 @@ function parseReply(text) {
     const end = body.lastIndexOf("}");
     if (start >= 0 && end > start) body = body.slice(start, end + 1);
   }
-  let json;
   try {
-    json = JSON.parse(body);
+    const json = JSON.parse(body);
+    if (json === null || typeof json !== "object" || Array.isArray(json)) throw new Error("not an object");
+    return json;
   } catch (error) {
     throw new BridgeValidationError(`The reply is not a JSON object (${error.message})`);
   }
+}
+
+/** `{ summary, code, files? }` or `{ error }` from the model's reply text. */
+function parseReply(text) {
+  const json = parseJsonObject(text);
   if (typeof json?.error === "string" && json.error.trim()) return { error: json.error.trim() };
   if (typeof json?.summary !== "string" || typeof json?.code !== "string") {
     throw new BridgeValidationError('The reply must have string fields "summary" and "code"');
@@ -165,7 +224,162 @@ function parseReply(text) {
   return { summary: json.summary, code: json.code, files: files?.length ? files : undefined };
 }
 
+/** Deliver one storyboard step from the model's JSON reply; throws BridgeValidationError when it does not fit. */
+async function deliverBoardStep(request, reply) {
+  if (request.deliverable === "styles") {
+    if (!Array.isArray(reply.styles) || reply.styles.length === 0) throw new BridgeValidationError('The reply must have a non-empty "styles" array');
+    const board = await proposeStyles({
+      boardId: request.boardId,
+      ...(typeof reply.title === "string" && reply.title.trim() ? { title: reply.title.trim() } : {}),
+      ...(reply.stage && typeof reply.stage === "object" ? { stage: reply.stage } : {}),
+      styles: reply.styles,
+    });
+    return { message: `Proposed ${board.styles.length} style frames: ${board.styles.map((style) => style.name).join(", ")}` };
+  }
+  if (request.deliverable === "storyboard") {
+    if (!Array.isArray(reply.shots) || reply.shots.length === 0) throw new BridgeValidationError('The reply must have a non-empty "shots" array');
+    const board = await proposeStoryboard(request.boardId, { notes: typeof reply.notes === "string" ? reply.notes : "", shots: reply.shots });
+    return { message: `Storyboard with ${board.shots.length} shots` };
+  }
+  if (typeof reply.summary !== "string" || typeof reply.code !== "string") {
+    throw new BridgeValidationError('The reply must have string fields "summary" and "code"');
+  }
+  const files = Array.isArray(reply.files) ? reply.files.filter((f) => typeof f?.path === "string" && typeof f?.content === "string") : [];
+  const result = await push({
+    type: "project",
+    name: request.board.title,
+    summary: reply.summary,
+    code: reply.code,
+    ...(files.length ? { files } : {}),
+    boardId: request.boardId,
+  });
+  return { message: `Built the video (${result.layers} top-level layers)`, built: { eventId: result.eventId, projectId: result.projectId, code: reply.code } };
+}
+
+/** Wait until the editor shared the project with this id (it loads a new scene within a few seconds). */
+async function waitForOpenProject(projectId, seconds = 20) {
+  const deadline = Date.now() + seconds * 1000;
+  while (Date.now() < deadline) {
+    try {
+      const { project } = await getProject();
+      if (project.id === projectId) return true;
+    } catch {
+      // nothing shared yet
+    }
+    await sleep(1000);
+  }
+  return false;
+}
+
+/** After a build: the local quality check, and one Claude run to fix real errors (warnings are left to the designer). */
+async function polishBuiltVideo(bin, model, built) {
+  let report;
+  try {
+    ({ report } = await checkQuality(built.eventId));
+  } catch (error) {
+    say(`  Quality check skipped: ${error.message}`);
+    return;
+  }
+  const errors = report.issues.filter((issue) => issue.severity === "error");
+  if (errors.length === 0) {
+    say(`  Quality check: ${report.issues.length ? `${report.issues.length} suggestion(s), no errors` : "no problems"}`);
+    return;
+  }
+  say(`  Quality check: ${errors.length} problem(s); asking Claude to fix them`);
+  if (!(await waitForOpenProject(built.projectId))) {
+    say("  The editor did not open the new video, so the fixes were not sent. Use Check in the editor.");
+    return;
+  }
+  const prompt = [
+    "You built the video below. A quality check that rendered it found these problems:",
+    "",
+    ...errors.map((issue) => `- ${issue.start.toFixed(1)}-${issue.end.toFixed(1)}s${issue.layerId ? ` (layer ${issue.layerId})` : ""}: ${issue.message}`),
+    "",
+    "Fix them and keep everything else exactly as it is: the same layers, data-layer-id values, timing and style.",
+    'Reply with ONLY a JSON object: {"summary": "<one sentence, in the language of the video\'s text>", "code": "<the complete corrected entry file>"}',
+    "",
+    "# The video",
+    "",
+    "```jsx",
+    built.code,
+    "```",
+  ].join("\n");
+  try {
+    const run = await runClaude(bin, prompt, model);
+    const reply = parseReply(run.text);
+    if ("error" in reply) return;
+    await push({ type: "edit", summary: reply.summary, code: reply.code, prompt: "Quality check fixes", ...(reply.files ? { files: reply.files } : {}) });
+    say(`  Fixed: ${reply.summary.replace(/\s+/g, " ").slice(0, 160)}`);
+  } catch (error) {
+    say(`  Could not fix automatically: ${error.message}`);
+  }
+}
+
+/** The board's reference previews (styles and storyboard steps only), as base64 JPEGs. */
+async function referenceImages(request) {
+  if (request.deliverable === "scene") return [];
+  const images = [];
+  for (const { file } of boardReferenceFiles(request.board)) {
+    try {
+      images.push((await readFile(file)).toString("base64"));
+    } catch {
+      say(`  Reference preview missing: ${file}`);
+    }
+  }
+  return images;
+}
+
+async function handleBoardStep(bin, request, model) {
+  say(`Storyboard step ${request.id} (${request.action}) for "${request.board.title}"`);
+  const images = await referenceImages(request);
+  if (images.length) say(`  with ${images.length} reference image(s)`);
+  let prompt = request.brief;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let text;
+    try {
+      const run = await runClaude(bin, prompt, model, images);
+      text = run.text;
+      say(`  Claude answered in ${run.seconds}s`);
+    } catch (error) {
+      say(`  ${error.message}`);
+      await decline(request.id, `Autopilot: ${error.message}`).catch(() => undefined);
+      return;
+    }
+    try {
+      const reply = parseJsonObject(text);
+      if (typeof reply.error === "string" && reply.error.trim()) {
+        await decline(request.id, reply.error.trim());
+        say(`  Declined: ${reply.error.trim()}`);
+        return;
+      }
+      const delivered = await deliverBoardStep(request, reply);
+      say(`  ${delivered.message}`);
+      if (delivered.built) await polishBuiltVideo(bin, model, delivered.built);
+      return;
+    } catch (error) {
+      if (error instanceof BridgeValidationError && attempt === 1) {
+        say("  The answer did not pass validation; asking Claude to fix it");
+        prompt = `${request.brief}\n\n# Your previous reply\n${text}\n\n# Problem\nIt failed validation: ${error.message}\nReturn the corrected JSON object only.`;
+        continue;
+      }
+      if (error instanceof BridgeError && error.status === 409) {
+        // The designer moved on (picked another style, asked for changes) while Claude was working.
+        say(`  Skipped: ${error.message}`);
+        return;
+      }
+      const reason = error instanceof Error ? error.message : String(error);
+      say(`  Giving up: ${reason}`);
+      await decline(request.id, `Autopilot could not complete this storyboard step: ${reason}`).catch(() => undefined);
+      return;
+    }
+  }
+}
+
 async function handle(bin, request, model) {
+  if (request.kind === "board") {
+    await handleBoardStep(bin, request, model);
+    return;
+  }
   const where = request.layerId ? ` · layer "${request.layerName ?? request.layerId}"` : "";
   say(`Request ${request.id} (${request.scope}${where}): ${request.prompt}`);
   let prompt = request.brief;
@@ -226,7 +440,13 @@ async function main() {
 
   WORK_DIR = await mkdtemp(path.join(os.tmpdir(), "wedo-autopilot-"));
   CONTRACT_FILE = path.join(WORK_DIR, "system-prompt.md");
-  const cleanup = () => rmSync(WORK_DIR, { recursive: true, force: true });
+  const cleanup = () => {
+    try {
+      rmSync(WORK_DIR, { recursive: true, force: true });
+    } catch {
+      // Windows may still hold the folder for a moment; the OS temp cleanup removes it later.
+    }
+  };
   process.once("exit", cleanup);
   for (const signal of ["SIGINT", "SIGTERM", "SIGBREAK"]) process.once(signal, () => process.exit(130));
   let warned = false;

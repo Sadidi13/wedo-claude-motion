@@ -55,8 +55,8 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     <div
       ref={ref}
       role="menu"
-      style={{ left, top, width: MENU_WIDTH }}
-      className="fixed z-50 rounded-md border border-border-strong bg-panel-2 py-1 text-[12px] shadow-xl"
+      style={{ left, top, width: MENU_WIDTH, maxHeight: window.innerHeight - 8 }}
+      className="ms-scroll fixed z-50 overflow-y-auto rounded-md border border-border-strong bg-panel-2 py-1 text-[12px] shadow-xl"
     >
       {items.map((item, index) => (
         <div key={item.label} className={cx(item.separator && index > 0 && "mt-1 border-t border-border pt-1")}>

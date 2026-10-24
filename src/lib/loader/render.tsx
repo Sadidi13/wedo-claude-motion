@@ -25,6 +25,7 @@ import type { Project, StageMeta } from "@/lib/types";
 import * as runtime from "@/runtime";
 import { motionWindow } from "@/runtime/globals";
 import { GSAP_NAMESPACES } from "@/runtime/gsap";
+import { clearMotionOverrides } from "@/runtime/layerMotion";
 import { LoadError } from "./errors";
 import { createModuleSystem } from "./modules";
 import { normalisePath } from "./paths";
@@ -162,6 +163,9 @@ function createCssInjector() {
 // ---------------------------------------------------------------------------
 
 export async function loadProject(project: Project, mount: HTMLElement, opts: LoadOptions = {}): Promise<LoadResult> {
+  // The exporter reads the clips this page renders; start a new list for the new project.
+  runtime.resetAudioClips();
+  clearMotionOverrides();
   const files = buildFileTable(project.files);
   const entry = normalisePath(project.entry);
   const css = createCssInjector();

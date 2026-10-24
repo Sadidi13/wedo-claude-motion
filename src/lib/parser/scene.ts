@@ -3,20 +3,23 @@
  *
  * Naming: `data-layer-name` > the element's own static text (first 24 chars)
  * > a Sprite with a single child layer borrows that child's text > `<Tag>`.
- * Kind: Sprite → sprite; img/Image/video → image; SVG tags → shape;
+ * Kind: Sprite → sprite; Audio → audio; img/Image/video → image; SVG tags → shape;
  * Three3D / canvas → canvas; capitalised tag → component; has child layers → group; text / expression
  * children only → text; empty box-like tag (div/span/section/hr) → shape;
  * anything else → element.
  * Range: a Sprite's literal start/end (absent start = 0, absent end =
- * Infinity) intersected with the parent range; non-Sprites inherit the parent
- * range; the root range is [0, meta.duration].
+ * Infinity) intersected with the parent range; an Audio's likewise, except that
+ * a built-in sound without `end` lasts its own length; other elements inherit
+ * the parent range; the root range is [0, meta.duration].
  */
 import type * as t from "@babel/types";
+import { sfxDuration } from "@/lib/audio/sfx";
+import { parseMotion } from "@/lib/motion/keyframes";
 import type { LayerKind, LayerNode, ParsedScene, StageMeta } from "@/lib/types";
 import { ATTR, attrIsTrue, attrNumber, attrString, findAttr, tagBaseName } from "./attrs";
 import { lineOf, span } from "./babel";
 import { tagSlug } from "./ids";
-import { type StageContext, type WalkedElement, elementId, isSpriteTag, loadStage } from "./stage";
+import { type StageContext, type WalkedElement, elementId, isAudioTag, isTimedTag, loadStage } from "./stage";
 
 const NAME_MAX = 24;
 const PREVIEW_MAX = 60;
@@ -124,19 +127,25 @@ function buildNode(
     id = `${id}@${s.start}`;
   }
 
-  const sprite = isSpriteTag(tag);
+  const timed = isTimedTag(tag);
   let start: number | undefined;
   let end: number | undefined;
-  if (sprite) {
+  if (timed) {
+    const label = tagBaseName(tag);
     const startAttr = findAttr(node, "start");
     const endAttr = findAttr(node, "end");
     start = startAttr ? attrNumber(startAttr) : 0;
     end = endAttr ? attrNumber(endAttr) : Infinity;
+    if (!endAttr && isAudioTag(tag) && start !== undefined) {
+      // A built-in sound without `end` plays its own length.
+      const length = sfxDuration(attrString(findAttr(node, "sfx")) ?? "");
+      if (length !== undefined && !attrIsTrue(findAttr(node, "loop"))) end = start + length;
+    }
     if (startAttr && start === undefined) {
-      warnings.push(`Sprite "${id}" (line ${line}) has a dynamic "start"; its timing is read-only`);
+      warnings.push(`${label} "${id}" (line ${line}) has a dynamic "start"; its timing is read-only`);
     }
     if (endAttr && end === undefined) {
-      warnings.push(`Sprite "${id}" (line ${line}) has a dynamic "end"; its timing is read-only`);
+      warnings.push(`${label} "${id}" (line ${line}) has a dynamic "end"; its timing is read-only`);
     }
   }
   if (el.repeated) {
@@ -166,12 +175,29 @@ function buildNode(
     children: [],
     loc: { start: s.start, end: s.end, line },
   };
-  if (sprite) {
+  if (timed) {
     layer.start = start;
     layer.end = end;
   }
+  if (isAudioTag(tag)) {
+    const number = (name: string) => {
+      const attr = findAttr(node, name);
+      return attr ? attrNumber(attr) : undefined;
+    };
+    layer.audio = {
+      src: attrString(findAttr(node, "src")),
+      sfx: attrString(findAttr(node, "sfx")),
+      from: number("from"),
+      volume: number("volume"),
+      fadeIn: number("fadeIn"),
+      fadeOut: number("fadeOut"),
+      loop: attrIsTrue(findAttr(node, "loop")),
+    };
+  }
   const explicitName = attrString(findAttr(node, ATTR.name));
   if (explicitName) layer.name = explicitName;
+  const motion = parseMotion(attrString(findAttr(node, ATTR.motion)));
+  if (motion) layer.motion = motion;
   return layer;
 }
 
@@ -199,6 +225,7 @@ function finalize(layer: LayerNode, content: Map<LayerNode, OwnContent>): void {
 function classify(layer: LayerNode, own: OwnContent): LayerKind {
   const base = tagBaseName(layer.tag);
   if (base === "Sprite") return "sprite";
+  if (base === "Audio") return "audio";
   if (IMAGE_TAGS.has(base)) return "image";
   if (SHAPE_TAGS.has(base)) return "shape";
   if (CANVAS_TAGS.has(base)) return "canvas";

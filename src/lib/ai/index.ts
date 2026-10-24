@@ -19,4 +19,5 @@ export {
 } from "./service";
 export { type AiEditRequestInput, type AiOutput, AiEditRequestSchema, AiOutputSchema, ProjectSchema } from "./schema";
 export { SYSTEM_PROMPT, buildMessages } from "./prompts";
+export { STORYBOARD_GUIDE, STYLE_LIBRARY, styleLibraryMarkdown, type StyleDirection } from "./storyboard";
 export { findDisallowedImports, findForbiddenCalls, validateAiOutput } from "./validate";

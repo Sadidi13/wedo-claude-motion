@@ -9,6 +9,7 @@
 
 import { rm, stat } from "node:fs/promises";
 import path from "node:path";
+import { mixAudio } from "./audio";
 import { encode } from "./ffmpeg";
 import { createJob, jobDir, readOptions, readProject, readStatus, writeStatus } from "./jobs";
 import { resolvePlan } from "./plan";
@@ -31,8 +32,16 @@ async function runExportJob(jobId: string, origin: string): Promise<void> {
   if (running.has(jobId)) throw new Error(`Export job "${jobId}" is already running`);
   running.add(jobId);
   try {
-    const { plan, framesDir } = await renderJob(jobId, origin);
+    const { plan, framesDir, audio } = await renderJob(jobId, origin);
     await writeStatus(jobId, { state: "encoding" });
+    const options = await readOptions(jobId);
+    const project = await readProject(jobId);
+    let soundTrack: string | null = null;
+    if (options?.audio !== false && plan.format !== "gif" && audio.length > 0) {
+      const mixed = await mixAudio(jobDir(jobId), audio, plan.range, project?.meta.duration ?? plan.range.end);
+      soundTrack = mixed.file;
+      for (const reason of mixed.skipped) console.warn(`[export] job ${jobId}: sound skipped (${reason})`);
+    }
     await encode(jobDir(jobId), {
       format: plan.format,
       fps: plan.fps,
@@ -40,8 +49,11 @@ async function runExportJob(jobId: string, origin: string): Promise<void> {
       quality: plan.quality,
       width: plan.outputWidth,
       height: plan.outputHeight,
+      audio: soundTrack,
     });
     await rm(framesDir, { recursive: true, force: true });
+    await rm(path.join(jobDir(jobId), "audio"), { recursive: true, force: true });
+    if (soundTrack) await rm(soundTrack, { force: true });
     await writeStatus(jobId, {
       state: "done",
       progress: 1,

@@ -31,6 +31,8 @@ import {
   moveLayer as parserMoveLayer,
   parseScene,
   replaceLayerSource,
+  setLayerAttribute,
+  setLayerMotion,
   setLayerHidden,
   setLayerLocked,
   setLayerName,
@@ -41,10 +43,15 @@ import {
 import type { AiChatTurn, AiScope, LayerRect, ParsedScene, Project, ProjectFile, StageMeta } from "@/lib/types";
 import { ancestorIds } from "./layerRows";
 import { createAutosaver, saveProject } from "./persistence";
+import { saveVersion } from "./versions";
+import { SFX, isSfxName } from "@/lib/audio/sfx";
+import type { MotionSpec } from "@/lib/motion/keyframes";
 import {
   type ShapeKind,
   assetPathFor,
+  audioLayerTemplate,
   clipAtPlayhead,
+  ensureRuntimeImport,
   ensureSpriteImport,
   imageLayerTemplate,
   shapeLayerTemplate,
@@ -77,6 +84,10 @@ export interface EditorState {
   time: number;
   playing: boolean;
   loop: boolean;
+  /** preview sound off (<Audio> layers stay in the project and in exports) */
+  muted: boolean;
+  /** frame-comment mode: a click on the canvas drops a comment for Claude (CommentLayer) */
+  commentMode: boolean;
   previewReady: boolean;
   previewError: string | null;
   /** stack trace of `previewError`, when the preview sent one */
@@ -103,6 +114,8 @@ export interface EditorState {
   pause(): void;
   togglePlay(): void;
   toggleLoop(): void;
+  toggleMuted(): void;
+  setCommentMode(on: boolean): void;
   /** move the playhead by whole frames (negative = backwards) */
   stepFrames(frames: number): void;
   stepSeconds(seconds: number): void;
@@ -111,6 +124,10 @@ export interface EditorState {
   duplicateLayer(id: string): void;
   moveLayer(id: string, move: LayerMove): void;
   setTiming(id: string, timing: { start?: number; end?: number }): void;
+  /** one literal prop of a layer (e.g. an <Audio>'s volume); null / false removes it */
+  setAttribute(id: string, name: string, value: number | string | boolean | null): void;
+  /** the layer's move / scale / rotate / opacity (data-motion); null removes it. One undo step. */
+  setMotion(id: string, spec: MotionSpec | null): void;
   setHidden(id: string, hidden: boolean): void;
   setLocked(id: string, locked: boolean): void;
   renameLayer(id: string, name: string): void;
@@ -123,6 +140,10 @@ export interface EditorState {
   addTextLayer(): void;
   addImageLayer(file: File): Promise<void>;
   addShapeLayer(kind: ShapeKind): void;
+  /** an audio file as an <Audio> clip at the playhead (its own length) */
+  addAudioLayer(file: File): Promise<void>;
+  /** a built-in sound effect (or a looping bed under the rest of the scene) at the playhead */
+  addSfxLayer(name: string): void;
 
   undo(): void;
   redo(): void;
@@ -189,6 +210,24 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.onload = () => resolve(String(reader.result));
     reader.onerror = () => reject(reader.error ?? new Error(`Could not read ${file.name}`));
     reader.readAsDataURL(file);
+  });
+}
+
+/** Length in seconds of an audio data URL (the browser decodes the header); null when unknown. */
+function audioLength(dataUrl: string): Promise<number | null> {
+  if (typeof window === "undefined" || typeof window.Audio !== "function") return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const probe = new window.Audio();
+    const done = (value: number | null) => {
+      clearTimeout(timer);
+      probe.removeAttribute("src");
+      resolve(value);
+    };
+    const timer = setTimeout(() => done(null), 5_000);
+    probe.preload = "metadata";
+    probe.onloadedmetadata = () => done(Number.isFinite(probe.duration) && probe.duration > 0 ? probe.duration : null);
+    probe.onerror = () => done(null);
+    probe.src = dataUrl;
   });
 }
 
@@ -318,10 +357,10 @@ export const useEditorStore = create<EditorState>()((set, get) => {
     rafHandle = requestAnimationFrame(tick);
   };
 
-  const insertTemplate = (jsx: string, base?: Project): string => {
+  const insertTemplate = (jsx: string, base?: Project, runtimeName = "Sprite"): string => {
     const current = get().project;
     if (!current) throw new Error("No project loaded");
-    const { source, id } = parserInsertLayer(ensureSpriteImport(entrySource(current)), null, jsx);
+    const { source, id } = parserInsertLayer(ensureRuntimeImport(entrySource(current), runtimeName), null, jsx);
     commitSource(source, { recordHistory: true, base });
     set({ selectedId: id });
     return id;
@@ -335,6 +374,8 @@ export const useEditorStore = create<EditorState>()((set, get) => {
     time: 0,
     playing: false,
     loop: true,
+    muted: false,
+    commentMode: false,
     previewReady: false,
     previewError: null,
     previewErrorDetail: null,
@@ -378,6 +419,8 @@ export const useEditorStore = create<EditorState>()((set, get) => {
         filesRevision: state.filesRevision + 1,
       }));
       persist(project);
+      // A baseline version (skipped when the newest saved version is the same code).
+      void saveVersion(project, `Opened “${project.name}”`);
     },
 
     newBlankProject(meta) {
@@ -437,6 +480,14 @@ export const useEditorStore = create<EditorState>()((set, get) => {
       set((state) => ({ loop: !state.loop }));
     },
 
+    toggleMuted() {
+      set((state) => ({ muted: !state.muted }));
+    },
+
+    setCommentMode(on) {
+      set({ commentMode: on });
+    },
+
     stepFrames(frames) {
       const fps = fpsOf();
       const { time } = get();
@@ -486,6 +537,16 @@ export const useEditorStore = create<EditorState>()((set, get) => {
         end: timing.end === undefined ? undefined : Math.max(0, snapToFrame(timing.end, fps)),
       };
       tryEdit((source) => setLayerTiming(source, id, snapped));
+    },
+
+    setAttribute(id, name, value) {
+      if (!guardUnlocked(id)) return;
+      tryEdit((source) => setLayerAttribute(source, id, name, value));
+    },
+
+    setMotion(id, spec) {
+      if (!guardUnlocked(id)) return;
+      tryEdit((source) => setLayerMotion(source, id, spec));
     },
 
     setHidden(id, hidden) {
@@ -570,6 +631,43 @@ export const useEditorStore = create<EditorState>()((set, get) => {
         const withAsset: Project = { ...project, files: { ...project.files, [path]: asset } };
         const timing = clipAtPlayhead(time, scene.meta.duration, scene.meta.fps);
         insertTemplate(imageLayerTemplate(timing, path, file.name), withAsset);
+      } catch (error) {
+        set({ notice: { kind: "error", message: errorMessage(error) } });
+      }
+    },
+
+    async addAudioLayer(file) {
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        const length = await audioLength(dataUrl);
+        const { project, scene, time } = get();
+        if (!project || !scene) return;
+        const path = assetPathFor(file.name, Object.keys(project.files));
+        const asset: ProjectFile = { path, kind: "asset", content: dataUrl };
+        const withAsset: Project = { ...project, files: { ...project.files, [path]: asset } };
+        const fps = scene.meta.fps;
+        const start = snapToFrame(clamp(time, 0, scene.meta.duration), fps);
+        const end = snapToFrame(Math.min(scene.meta.duration, start + (length ?? scene.meta.duration)), fps);
+        const name = file.name.replace(/\.[^.]+$/, "") || "Audio";
+        insertTemplate(audioLayerTemplate({ src: path, start, end, name }), withAsset, "Audio");
+      } catch (error) {
+        set({ notice: { kind: "error", message: errorMessage(error) } });
+      }
+    },
+
+    addSfxLayer(name) {
+      const { scene, time } = get();
+      if (!scene || !isSfxName(name)) return;
+      try {
+        const sound = SFX[name];
+        const start = snapToFrame(clamp(time, 0, scene.meta.duration), scene.meta.fps);
+        insertTemplate(
+          sound.loop
+            ? audioLayerTemplate({ sfx: name, start, end: scene.meta.duration, name: sound.label, loop: true, volume: 0.5 })
+            : audioLayerTemplate({ sfx: name, start, name: sound.label }),
+          undefined,
+          "Audio",
+        );
       } catch (error) {
         set({ notice: { kind: "error", message: errorMessage(error) } });
       }

@@ -116,7 +116,7 @@ describe("events", () => {
   it("start from the current cursor and then deliver in order", async () => {
     expect(await eventsAfter(null)).toEqual({ events: [], cursor: "" });
 
-    const created = await pushNewScene({ type: "project", name: "Teaser", summary: "A teaser", code: GOOD_SCENE_CODE });
+    const created = await pushNewScene({ type: "project", name: "Teaser", summary: "A teaser", code: GOOD_SCENE_CODE, skipStoryboard: true });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
     expect(created.event.type).toBe("project");
@@ -131,7 +131,7 @@ describe("events", () => {
   });
 
   it("new scenes become projects whose meta comes from the Stage", async () => {
-    const created = await pushNewScene({ type: "project", name: "Teaser", summary: "s", code: GOOD_SCENE_CODE });
+    const created = await pushNewScene({ type: "project", name: "Teaser", summary: "s", code: GOOD_SCENE_CODE, skipStoryboard: true });
     if (!created.ok || created.event.type !== "project") throw new Error("expected a project event");
     const project = created.event.project;
     expect(project.name).toBe("Teaser");
@@ -139,8 +139,14 @@ describe("events", () => {
     expect(project.files[project.entry]?.content).toContain("<Stage");
   });
 
+  it("refuses a new scene without a storyboard unless it was explicitly skipped", async () => {
+    const result = await pushNewScene({ type: "project", name: "Teaser", summary: "s", code: GOOD_SCENE_CODE });
+    expect(result).toMatchObject({ ok: false, status: 409 });
+    if (!result.ok) expect(result.error).toContain("storyboard");
+  });
+
   it("rejects scene code that fails validation", async () => {
-    const result = await pushNewScene({ type: "project", name: "Bad", summary: "s", code: "export default function A() { return <div/>; }" });
+    const result = await pushNewScene({ type: "project", name: "Bad", summary: "s", code: "export default function A() { return <div/>; }", skipStoryboard: true });
     expect(result.ok).toBe(false);
   });
 

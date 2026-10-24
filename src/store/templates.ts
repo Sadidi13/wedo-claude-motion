@@ -1,8 +1,8 @@
 /**
- * JSX templates for the "+ Text / + Image / + Shape" buttons and the small
- * source helpers around them (clip placement at the playhead, asset paths,
- * making sure `Sprite` is imported). Pure string builders — the parser's
- * `insertLayer` assigns the `data-layer-id`s.
+ * JSX templates for the "+ Text / + Image / + Shape / + Sound" buttons and the
+ * small source helpers around them (clip placement at the playhead, asset
+ * paths, making sure `Sprite` / `Audio` are imported). Pure string builders —
+ * the parser's `insertLayer` assigns the `data-layer-id`s.
  */
 
 export interface ClipTiming {
@@ -95,6 +95,31 @@ export function imageLayerTemplate(timing: ClipTiming, assetPath: string, name: 
 </Sprite>`;
 }
 
+export interface AudioTemplateOptions {
+  /** project asset path, or a built-in sound in `sfx` */
+  src?: string;
+  sfx?: string;
+  start: number;
+  /** omitted: the clip plays its own length */
+  end?: number;
+  name: string;
+  volume?: number;
+  loop?: boolean;
+}
+
+/** One <Audio> clip layer (a direct child of the Stage). */
+export function audioLayerTemplate(options: AudioTemplateOptions): string {
+  const attrs = [
+    options.src ? `src="${escapeAttr(options.src)}"` : `sfx="${escapeAttr(options.sfx ?? "")}"`,
+    `start={${options.start}}`,
+    options.end !== undefined ? `end={${options.end}}` : "",
+    options.volume !== undefined && options.volume !== 1 ? `volume={${options.volume}}` : "",
+    options.loop ? "loop" : "",
+    `data-layer-name="${escapeAttr(options.name)}"`,
+  ].filter(Boolean);
+  return `<Audio ${attrs.join(" ")} />`;
+}
+
 function escapeAttr(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
@@ -115,25 +140,30 @@ export function assetPathFor(fileName: string, taken: Iterable<string>): string 
 const RUNTIME_IMPORT = /import\s*\{([^}]*)\}\s*from\s*(["'])(\.\/animations(?:\.jsx|\.js|\.tsx|\.ts)?|@motion\/runtime|motion-runtime)\2\s*;?/;
 
 /**
- * Make sure the entry file imports `Sprite` from the runtime (templates and
- * wrapInSprite emit `<Sprite>`). Extends the existing runtime import's named
- * list, or adds one after the last import when there is none.
+ * Make sure the entry file imports `name` (`Sprite`, `Audio`) from the runtime
+ * (templates and wrapInSprite emit them). Extends the existing runtime
+ * import's named list, or adds one after the last import when there is none.
  */
-export function ensureSpriteImport(source: string): string {
+export function ensureRuntimeImport(source: string, name: string): string {
   const match = RUNTIME_IMPORT.exec(source);
   if (match) {
     const names = match[1].split(",").map((n) => n.trim()).filter(Boolean);
-    if (names.some((n) => n === "Sprite" || n.startsWith("Sprite as"))) return source;
+    if (names.some((n) => n === name || n.startsWith(`${name} as`))) return source;
     const spacer = match[1].trim() ? " " : "";
-    const replacement = match[0].replace(match[1], `${spacer}${[...names, "Sprite"].join(", ")} `);
+    const replacement = match[0].replace(match[1], `${spacer}${[...names, name].join(", ")} `);
     return source.slice(0, match.index) + replacement + source.slice(match.index + match[0].length);
   }
-  if (/\bSprite\b/.test(source.split(/<Stage\b/)[0])) return source; // declared or imported some other way
+  if (new RegExp(`\\b${name}\\b`).test(source.split(/<Stage\b/)[0])) return source; // declared or imported some other way
   const eol = source.includes("\r\n") ? "\r\n" : "\n";
-  const line = `import { Sprite } from "./animations.jsx";${eol}`;
+  const line = `import { ${name} } from "./animations.jsx";${eol}`;
   const imports = [...source.matchAll(/^import\b[^\n]*\n?/gm)];
   if (imports.length === 0) return line + source;
   const last = imports[imports.length - 1];
   const at = (last.index ?? 0) + last[0].length;
   return source.slice(0, at) + line + source.slice(at);
+}
+
+/** `ensureRuntimeImport(source, "Sprite")`. */
+export function ensureSpriteImport(source: string): string {
+  return ensureRuntimeImport(source, "Sprite");
 }

@@ -12,13 +12,18 @@
  *
  * Each reply is applied immediately with history so "Undo" is one click;
  * errors are shown verbatim in the thread.
+ *
+ * "New scene" through Claude Desktop starts a storyboard instead
+ * (docs/STORYBOARD.md): Claude proposes style frames, then a storyboard, and
+ * builds the video only after the designer approves it in the storyboard view.
  */
-import { CircleAlert, Send, Sparkles, Trash2, Undo2, X } from "lucide-react";
+import { CircleAlert, Paperclip, Send, Sparkles, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { createBlankProject } from "@/lib/importer";
 import type { AiEditRequest, AiEditResponse, AiErrorResponse, AiScope, BridgeStatus } from "@/lib/types";
 import { applyAiResult } from "@/store/aiApply";
+import { MAX_REFERENCE_FILES, checkReferenceFiles, useBoardStore } from "@/store/boardStore";
 import { isDesktopConnected, useBridgeStore } from "@/store/bridgeStore";
 import { chatKeyFor, errorMessage, useEditorStore, type ChatEntry } from "@/store/editorStore";
 import { useAiStatus } from "./hooks/useAiStatus";
@@ -112,7 +117,19 @@ export function AskClaudeTab() {
   const [includeFrame, setIncludeFrame] = useState(false);
   const [preferApi, setPreferApi] = useState(false);
   const [apiBusy, setApiBusy] = useState(false);
+  /** reference images / videos for a new video's storyboard */
+  const [references, setReferences] = useState<File[]>([]);
+  const [referenceError, setReferenceError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+
+  const addReferences = (files: FileList | null) => {
+    const picked = Array.from(files ?? []);
+    if (fileRef.current) fileRef.current.value = "";
+    const problem = checkReferenceFiles(picked, references.length);
+    setReferenceError(problem);
+    if (!problem) setReferences((current) => [...current, ...picked]);
+  };
 
   const apiReady = status.state === "ready";
   const transport: Transport = apiReady && preferApi ? "api" : "desktop";
@@ -170,6 +187,19 @@ export function AskClaudeTab() {
     const ctx = { scope: effectiveScope, layerId, key, prompt: text };
     if (effectiveScope !== "new") store.appendChat(key, { role: "user", content: text });
     setPrompt("");
+
+    if (transport === "desktop" && effectiveScope === "new") {
+      const started = await useBoardStore.getState().start(text, store.scene?.meta ?? project.meta, references);
+      if (started) {
+        setReferences([]);
+        setReferenceError(null);
+      } else {
+        const reason = useBoardStore.getState().error ?? "Could not start the storyboard";
+        useEditorStore.getState().appendChat("scene", { role: "assistant", content: reason, status: "error" });
+        setPrompt(text);
+      }
+      return;
+    }
 
     if (transport === "desktop") {
       try {
@@ -238,7 +268,9 @@ export function AskClaudeTab() {
         {thread.length === 0 && !pendingHere && (
           <p className="text-[11.5px] text-muted">
             <Sparkles size={12} className="mr-1 inline text-accent" />
-            Describe the change in English or Persian. Claude rewrites {effectiveScope === "layer" ? "only this layer" : "the scene"} and you can undo it.
+            {effectiveScope === "new" && transport === "desktop"
+              ? "Describe the video in English or Persian. Claude first shows you style frames and a storyboard; the video is made after you approve them."
+              : `Describe the change in English or Persian. Claude rewrites ${effectiveScope === "layer" ? "only this layer" : "the scene"} and you can undo it.`}
           </p>
         )}
         {thread.map((entry) => (
@@ -293,6 +325,44 @@ export function AskClaudeTab() {
           onKeyDown={onPromptKey}
           aria-label="Prompt for Claude"
         />
+        {effectiveScope === "new" && transport === "desktop" && (
+          <div className="flex flex-col gap-1">
+            <div className="flex flex-wrap items-center gap-1">
+              {references.map((file, index) => (
+                <span key={`${file.name}:${index}`} className="inline-flex max-w-[180px] items-center gap-1 rounded bg-panel-3 px-1.5 py-0.5 text-[10.5px]" title={file.name}>
+                  <span className="truncate">{file.name}</span>
+                  <button
+                    type="button"
+                    className="ms-focus text-muted hover:text-foreground"
+                    title="Remove this reference"
+                    onClick={() => setReferences((current) => current.filter((_, i) => i !== index))}
+                  >
+                    <X size={10} />
+                  </button>
+                </span>
+              ))}
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<Paperclip size={12} />}
+                disabled={references.length >= MAX_REFERENCE_FILES}
+                onClick={() => fileRef.current?.click()}
+                title="Attach an image or video whose look Claude should match (up to 4)"
+              >
+                Reference
+              </Button>
+              <input
+                ref={fileRef}
+                type="file"
+                multiple
+                accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm"
+                className="hidden"
+                onChange={(event) => addReferences(event.target.files)}
+              />
+            </div>
+            {referenceError && <p className="text-[11px] text-danger">{referenceError}</p>}
+          </div>
+        )}
         <div className="flex items-center gap-2">
           {apiReady ? (
             <Checkbox label="Use API key" checked={preferApi} onChange={setPreferApi} title="Send to the Anthropic API instead of Claude Desktop" />

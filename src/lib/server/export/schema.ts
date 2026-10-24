@@ -76,6 +76,7 @@ const optionsSchema = z.object({
   range: rangeSchema.optional(),
   transparent: z.boolean().optional(),
   quality: z.number().int().min(0).max(51).optional(),
+  audio: z.boolean().optional(),
 });
 
 const exportRequestSchema = z.object({ project: projectSchema, options: optionsSchema });

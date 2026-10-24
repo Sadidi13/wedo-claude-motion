@@ -19,5 +19,5 @@ export {
   moveLayer,
   replaceLayerSource,
 } from "./layerOps";
-export { setLayerHidden, setLayerLocked, setLayerName, setLayerTiming, wrapInSprite } from "./layerProps";
+export { setLayerAttribute, setLayerHidden, setLayerLocked, setLayerMotion, setLayerName, setLayerTiming, wrapInSprite } from "./layerProps";
 export { setStageMeta } from "./stageMeta";

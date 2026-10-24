@@ -30,9 +30,11 @@ What it defends against:
 | Another local program posing as Claude | Routes that read projects or answer requests need a random token in `.motion-bridge/state/token` (owner-only permissions on macOS and Linux). |
 | Path traversal | Project file paths are checked on the server and again where the CLI writes them; zip import rejects escaping paths; job and request ids are validated. |
 | Broken or hostile answers from Claude | Every answer is parsed and validated (imports allow-list, no timers or randomness, layer ids kept) before the editor applies it; each applied change is one Undo. |
-| Prompt injection through editor requests | Requests are labelled as untrusted data in the brief. The autopilot runs Claude Code with no tools, no MCP servers, no settings and in an empty temporary folder, so a request can only produce scene code. |
+| Prompt injection through editor requests | Requests, frame comments, storyboard notes and reference images are labelled as untrusted data in the brief. The autopilot runs Claude Code with no tools, no MCP servers, no settings and in an empty temporary folder, so a request can only produce scene code. |
 | Resource exhaustion | Request bodies up to 64 MB; stage up to 4096 px, 10 minutes, 120 fps, 36,000 frames; one export at a time; at most 20 queued requests; old jobs and requests are deleted. |
-| Rendered scenes escaping export | Chromium runs with its sandbox on, and the rendered page can only load itself, the app's bundles and its own job; it cannot call `/api`. |
+| Rendered scenes escaping export | Chromium runs with its sandbox on, and the rendered page can only load itself, the app's bundles and its own job; it cannot call `/api`. The quality check renders the same way, one check at a time. |
+| Reference files attached to a storyboard | At most 4 per board, 40 MB each, image and video extensions only; stored in the bridge state folder under validated ids and served only from their own board's folder. ffmpeg turns each into a JPEG preview with a time limit. |
+| Claude recording storyboard decisions | Without the bridge token a decision is the designer's and only queues the next step; style frames, storyboards and sketches need the token and are validated like new scenes. |
 
 ## Known limitations
 
@@ -47,7 +49,11 @@ What it defends against:
 - **`scripts/connect-claude-chat.cmd` and `install-chat` edit Claude Desktop's config file.** A
   backup is written next to it first.
 - **ffmpeg** comes from `ffmpeg-static`, which downloads a prebuilt binary at install time.
-  Set `FFMPEG_PATH` to use an ffmpeg you installed yourself.
+  Set `FFMPEG_PATH` to use an ffmpeg you installed yourself. It also decodes the reference images
+  and videos attached to a storyboard and the audio files of a project, so a malformed file could
+  reach an ffmpeg bug: attach files you trust, like any file you open.
+- **Built-in sounds** are rendered by ffmpeg from fixed formulas in `src/lib/audio/sfx.ts`; only
+  names from that list are accepted.
 
 ## Secrets
 

@@ -103,6 +103,10 @@ if ((Has "git") -and $isGitCheckout) {
   Remove-Item $zip, $unpacked -Recurse -Force
 }
 Info "Downloaded to $InstallDir"
+# Where the app lives, for the Claude Code plugin (plugin/skills/wedo-claude-motion/wedo.mjs).
+$locationDir = Join-Path $HOME ".wedo-claude-motion"
+New-Item -ItemType Directory -Force $locationDir | Out-Null
+Set-Content -Path (Join-Path $locationDir "location") -Value $InstallDir -Encoding ASCII
 
 # 4. Packages
 Step 4 "Installing the app's packages (about a minute)"

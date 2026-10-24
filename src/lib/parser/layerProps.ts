@@ -4,12 +4,13 @@
  * a minimal splice inside the element's opening tag (or around the element
  * for wrapInSprite).
  */
+import { type MotionSpec, serializeMotion } from "@/lib/motion/keyframes";
 import { ATTR, afterLayerId, afterTagName, attrIsTrue, findAttr, removeAttrEdit, setAttrEdit } from "./attrs";
 import { span } from "./babel";
 import { generateLayerId } from "./ids";
 import { detectIndentUnit } from "./layout";
 import { buildScene } from "./scene";
-import { collectAllIds, findElement, isSpriteTag, loadStage } from "./stage";
+import { collectAllIds, findElement, isTimedTag, loadStage } from "./stage";
 import { type TextEdit, applyEdits, eolOf, escapeJsxAttr, formatNumber, indentAt, reindent, splice } from "./text";
 
 /**
@@ -20,7 +21,7 @@ import { type TextEdit, applyEdits, eolOf, escapeJsxAttr, formatNumber, indentAt
 export function setLayerTiming(source: string, id: string, timing: { start?: number; end?: number }): string {
   const ctx = loadStage(source);
   const el = findElement(ctx, id);
-  if (!isSpriteTag(el.tag)) throw new Error(`Layer ${id} is not a Sprite; wrap it first`);
+  if (!isTimedTag(el.tag)) throw new Error(`Layer ${id} is not a Sprite; wrap it first`);
 
   const startAttr = findAttr(el.node, "start");
   const endAttr = findAttr(el.node, "end");
@@ -75,6 +76,48 @@ export function wrapInSprite(
     `${ATTR.id}="${spriteId}" ${ATTR.name}="${escapeJsxAttr(name)}">` +
     `${eol}${indent}${unit}${inner}${eol}${indent}</Sprite>`;
   return { source: splice(source, s.start, s.end, wrapped), spriteId };
+}
+
+/**
+ * Set one prop of a layer to a literal (`{0.8}`, `"text"`, a bare `loop` for true) or remove it
+ * (`null`, and `false` for flags). Used by the inspector for <Audio> volume, fades and loop.
+ */
+export function setLayerAttribute(source: string, id: string, name: string, value: number | string | boolean | null): string {
+  if (!/^[A-Za-z][\w-]*$/.test(name)) throw new Error(`Invalid attribute name "${name}"`);
+  const ctx = loadStage(source);
+  const el = findElement(ctx, id);
+  if (value === null || value === false) {
+    const edit = removeAttrEdit(source, el.node, name);
+    return edit ? applyEdits(source, [edit]) : source;
+  }
+  if (value === true) {
+    const attr = findAttr(el.node, name);
+    if (attr && attrIsTrue(attr)) return source;
+    if (attr) {
+      const edit = removeAttrEdit(source, el.node, name);
+      source = edit ? applyEdits(source, [edit]) : source;
+      return setLayerAttribute(source, id, name, true);
+    }
+    const at = afterTagName(el.node);
+    return applyEdits(source, [{ start: at, end: at, text: ` ${name}` }]);
+  }
+  const raw = typeof value === "number" ? `{${formatNumber(value)}}` : `"${escapeJsxAttr(value)}"`;
+  return applyEdits(source, [setAttrEdit(el.node, name, raw)]);
+}
+
+/**
+ * Write the layer's motion as `data-motion='{…}'` (after data-layer-id), or remove the attribute
+ * when `spec` is null or holds nothing but neutral values.
+ */
+export function setLayerMotion(source: string, id: string, spec: MotionSpec | null): string {
+  const ctx = loadStage(source);
+  const el = findElement(ctx, id);
+  const json = spec ? serializeMotion(spec) : null;
+  if (!json) {
+    const edit = removeAttrEdit(source, el.node, ATTR.motion);
+    return edit ? applyEdits(source, [edit]) : source;
+  }
+  return applyEdits(source, [setAttrEdit(el.node, ATTR.motion, `'${json}'`, afterLayerId(el.node))]);
 }
 
 /** Set or clear a boolean data-* flag (`data-hidden="true"` / `data-locked="true"`). */

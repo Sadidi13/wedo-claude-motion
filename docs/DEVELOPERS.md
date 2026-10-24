@@ -111,6 +111,9 @@ export default function Scene() {
 | `MOTION_STUDIO_ALLOWED_HOSTS` | extra host names the server answers to (default: localhost only) |
 | `MOTION_STUDIO_CHROMIUM_NO_SANDBOX` | `1` turns Chromium's sandbox off for export (only for containers that need it) |
 | `MOTION_STUDIO_ALLOW_REMOTE` | `1` lets the CLI send the bridge token to a non-local http server (not recommended) |
+| `MOTION_STUDIO_EXPORT_WORKERS` | pages rendering an export in parallel (default: half the logical cores, 2 to 8) |
+| `MOTION_STUDIO_SFX_DIR` | cache of the rendered built-in sounds, default `$TMPDIR/motion-studio/sfx-v1` |
+| `WEDO_CLAUDE_MOTION_DIR` | where the Claude Code plugin's launcher finds the app (else `~/.wedo-claude-motion/location`, then `~/wedo-claude-motion`) |
 
 Installer options (Windows, `scripts/install-windows.ps1`): `WEDO_INSTALL_DIR`, `WEDO_NO_SHORTCUTS=1`,
 `WEDO_NO_CONNECT=1`, `WEDO_NO_START=1`.
@@ -124,7 +127,9 @@ pnpm start      # serve the build
 pnpm test       # vitest (parser, loader, importer, samples, store, AI service, bridge, export)
 pnpm typecheck  # next typegen + tsc --noEmit
 pnpm lint       # eslint
-pnpm bridge     # bridge CLI: start | open | status | contract | project | wait | respond | fail | new | edit | install-chat
+pnpm bridge     # bridge CLI: start | open | status | contract | project | wait | respond | fail | new | edit |
+                #   board-styles | board | board-storyboard | board-choose | board-restyle | board-revise |
+                #   board-approve | styles | reference | qa | install-chat (docs/CLAUDE-DESKTOP.md#cli)
 pnpm autopilot  # answer the Ask Claude tab automatically with Claude Code
 ```
 
@@ -152,10 +157,29 @@ The editor is a local tool, so the server is locked to this machine:
 **Imported projects run code.** A project is JavaScript that runs inside the editor, like opening an
 HTML file. See [`SECURITY.md`](../SECURITY.md) for the full threat model.
 
+## Feature guides
+
+- [STORYBOARD.md](STORYBOARD.md): style frames, storyboard and approval before every new video; the
+  style library; reference images and videos.
+- [AUDIO.md](AUDIO.md): `<Audio>` layers, the built-in sounds, preview sync and the export mix.
+- [TRANSFORM.md](TRANSFORM.md): on-canvas move / scale / rotate, keyframes (`data-motion`), frame comments.
+- [QUALITY.md](QUALITY.md): the local quality check.
+- [VERSIONS.md](VERSIONS.md): version history.
+
+## Claude Code plugin
+
+`.claude-plugin/marketplace.json` makes the repository a plugin marketplace with one plugin,
+`plugin/`. Its skill (`plugin/skills/wedo-claude-motion/SKILL.md`) is the portable version of
+`.claude/skills/motion-studio/SKILL.md`: it runs every command through `wedo.mjs`, which finds the
+app (`WEDO_CLAUDE_MOTION_DIR`, the folder recorded in `~/.wedo-claude-motion/location` by the
+installer and `motion-bridge start`, `~/wedo-claude-motion`, or a parent of the current folder) and
+runs `scripts/motion-bridge.mjs` there. Check both manifests with `claude plugin validate .` and
+`claude plugin validate plugin`. Keep the two skills in step when the workflow changes.
+
 ## Roadmap
 
-1. On-canvas drag/resize that writes values back into the code.
-2. Frame screenshot as visual context for Ask Claude; Persian fonts bundled for export; audio track.
-3. Keyframe inspector over `interpolate()` curves.
+1. Persian fonts bundled for export.
+2. Keyframe curves editor (graph view) and keyframes for more properties (colour, blur).
+3. Audio waveforms on the timeline; voice-over recording.
 4. Windows app (Tauri) with bundled Chromium + ffmpeg, and a one-click Claude Desktop extension.
 5. Bridges: After Effects (Higgsfield Bridge), Lottie for simple SVG layers, Figma motion context.

@@ -6,6 +6,7 @@
  * active inspector tab, open dialog); everything else lives in the store.
  */
 import { useCallback, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { BoardView } from "./board/BoardView";
 import { Canvas } from "./Canvas";
 import { ExportDialog } from "./ExportDialog";
 import { useBootstrap } from "./hooks/useBootstrap";
@@ -14,6 +15,8 @@ import { useEditorHotkeys } from "./hooks/useEditorHotkeys";
 import { ImportDialog } from "./ImportDialog";
 import { Inspector, type InspectorTab } from "./Inspector";
 import { LayersPanel } from "./LayersPanel";
+import { HistoryDialog } from "./HistoryDialog";
+import { QualityDialog } from "./QualityDialog";
 import { SecondTabBanner } from "./SecondTabBanner";
 import { Timeline } from "./Timeline";
 import { TopBar } from "./TopBar";
@@ -25,7 +28,7 @@ const TIMELINE_DEFAULT = 240;
 const TIMELINE_MIN = 140;
 const TIMELINE_MAX = 560;
 
-type Dialog = "import" | "export" | null;
+type Dialog = "import" | "export" | "quality" | "history" | null;
 
 export default function Editor() {
   useBootstrap();
@@ -67,7 +70,7 @@ export default function Editor() {
       }}
     >
       <div className="col-span-3 min-w-0">
-        <TopBar onImport={() => setDialog("import")} onExport={() => setDialog("export")} />
+        <TopBar onImport={() => setDialog("import")} onExport={() => setDialog("export")} onCheck={() => setDialog("quality")} onHistory={() => setDialog("history")} />
       </div>
       <LayersPanel />
       <Canvas />
@@ -85,6 +88,9 @@ export default function Editor() {
       </div>
       {dialog === "import" && <ImportDialog onClose={closeDialog} />}
       {dialog === "export" && <ExportDialog onClose={closeDialog} />}
+      {dialog === "quality" && <QualityDialog onClose={closeDialog} />}
+      {dialog === "history" && <HistoryDialog onClose={closeDialog} />}
+      <BoardView />
       <SecondTabBanner />
     </div>
   );

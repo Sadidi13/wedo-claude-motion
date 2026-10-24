@@ -2,11 +2,13 @@
  * Applying Claude's edits to the editor, shared by the three ways an edit can
  * arrive: an API reply (/api/ai/edit), a Claude Desktop answer to a queued
  * request, and an edit Claude pushed from the desktop chat. Each successful
- * edit goes through the store's history, so one Undo reverts it.
+ * edit goes through the store's history, so one Undo reverts it, and is saved
+ * as a version (store/versions.ts) labelled with Claude's summary.
  */
 import { createBlankProject } from "@/lib/importer";
 import type { AiEditResponse, AiErrorResponse, AiScope, Project, ProjectFile } from "@/lib/types";
 import { errorMessage, useEditorStore } from "./editorStore";
+import { saveVersion } from "./versions";
 
 function fileKind(path: string): ProjectFile["kind"] {
   const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
@@ -68,6 +70,7 @@ export function applyAiResult(body: AiEditResponse | AiErrorResponse, ctx: AiTur
     return false;
   }
   const after = useEditorStore.getState();
+  if (after.project) void saveVersion(after.project, `Claude: ${body.summary.replace(/\s+/g, " ").trim()}`);
   if (ctx.scope === "new") after.appendChat("scene", { role: "user", content: ctx.prompt });
   after.appendChat(ctx.scope === "new" ? "scene" : ctx.key, { role: "assistant", content: body.summary, status: "applied" });
   return true;

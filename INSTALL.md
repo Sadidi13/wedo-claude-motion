@@ -7,6 +7,7 @@ Pick one way. Each one ends with the editor open in your browser.
 | [1. Ask Claude Code](#1-ask-claude-code-to-install-it) | anyone with Claude Code (the **Code** tab in the Claude app) | paste one message, approve |
 | [2. One line in PowerShell](#2-windows-one-line-in-powershell) | Windows | paste one line |
 | [3. By hand](#3-by-hand) | Mac, Linux, or when 1 and 2 do not work | five commands |
+| [4. Claude Code plugin](#4-claude-code-plugin) | Claude Code in a terminal, any folder | two commands, then ask for a video |
 
 Nothing here needs a password, an API key or a new account.
 
@@ -63,6 +64,23 @@ pnpm bridge start
 
 `pnpm bridge start` starts the app in the background and opens it in your browser. On Windows you can
 double-click `scripts\start.cmd` instead.
+
+## 4. Claude Code plugin
+
+The plugin teaches Claude Code, in any folder, to make videos in WeDo Claude Motion:
+
+```bash
+claude plugin marketplace add Sadidi13/wedo-claude-motion
+claude plugin install wedo-claude-motion@wedo-claude-motion
+```
+
+Inside Claude Code the same is `/plugin marketplace add Sadidi13/wedo-claude-motion`, then
+`/plugin install wedo-claude-motion@wedo-claude-motion`. For other coding agents that read skills:
+`npx skills add Sadidi13/wedo-claude-motion --skill wedo-claude-motion`.
+
+Then ask for a video. If the app is not on the computer yet, Claude offers to install it with the
+steps below, and from then on finds it by itself (it looks in `~/wedo-claude-motion`, in the folder the
+installer recorded in `~/.wedo-claude-motion/location`, or in `WEDO_CLAUDE_MOTION_DIR`).
 
 ## After installing
 
@@ -161,5 +179,8 @@ account: never ask for one. Ask the user before installing Node.js or pnpm.
     Claude, run `pnpm bridge install-chat` and open Claude again.
   - Do not run these yourself when you run inside the Claude app: they need the app closed, which
     ends this conversation.
+  - A new video starts with 3 style frames to choose from, then a storyboard to approve, in the
+    editor's Storyboard window; then Claude builds it.
+  - For Claude Code in a terminal, the plugin (section 4 above) works in any folder.
 - The optional autopilot, which answers the editor's Ask Claude tab by itself: see "Autopilot"
   above.

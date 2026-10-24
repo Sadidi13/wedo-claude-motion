@@ -6,6 +6,8 @@
  * them with `child_process.spawn` (never a shell string), keeps the tail of
  * stderr for error messages and always kills a still-running ffmpeg. The
  * png-sequence format does not use ffmpeg at all: the frames are zipped.
+ * With `audio` (the mixed WAV, see audio.ts) mp4 gets AAC, webm Opus and mov
+ * PCM in the same pass; the png-sequence zip gets `audio.wav`; gif stays silent.
  */
 
 import { existsSync } from "node:fs";
@@ -29,6 +31,8 @@ export interface EncodeOptions {
   /** pixel size of the frames (stage × scale) */
   width: number;
   height: number;
+  /** the mixed sound track (WAV) to add, when the project has <Audio> layers */
+  audio?: string | null;
 }
 
 export interface EncodePlan {
@@ -74,47 +78,64 @@ export function buildEncodeArgs(jobDir: string, opts: EncodeOptions): EncodePlan
   const input = ["-y", "-framerate", String(opts.fps), "-i", path.join(jobDir, "frames", framePattern(frameExt))];
   const output = path.join(jobDir, OUTPUT_FILE[opts.format]);
   const rate = ["-r", String(opts.fps)];
+  // Sound: a second input, mapped next to the video and cut to its length.
+  const sound = (codec: string[]): { input: string[]; output: string[] } =>
+    opts.audio
+      ? { input: ["-i", opts.audio], output: ["-map", "0:v:0", "-map", "1:a:0", ...codec, "-shortest"] }
+      : { input: [], output: [] };
 
   switch (opts.format) {
-    case "mp4":
+    case "mp4": {
+      const audio = sound(["-c:a", "aac", "-b:a", "192k"]);
       return {
         passes: [
           [
             ...input,
+            ...audio.input,
             ...evenDimensionFilter(opts.width, opts.height),
             "-c:v", "libx264", "-preset", "slow", "-crf", String(opts.quality),
             "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+            ...audio.output,
             ...rate, output,
           ],
         ],
         output,
         frameExt,
       };
-    case "webm":
+    }
+    case "webm": {
+      const audio = sound(["-c:a", "libopus", "-b:a", "160k"]);
       return {
         passes: [
           [
             ...input,
+            ...audio.input,
             ...evenDimensionFilter(opts.width, opts.height),
             "-c:v", "libvpx-vp9", "-pix_fmt", transparent ? "yuva420p" : "yuv420p", "-b:v", "0", "-crf", "24",
+            ...audio.output,
             ...rate, output,
           ],
         ],
         output,
         frameExt,
       };
-    case "mov":
+    }
+    case "mov": {
+      const audio = sound(["-c:a", "pcm_s16le"]);
       return {
         passes: [
           [
             ...input,
+            ...audio.input,
             "-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", transparent ? "yuva444p10le" : "yuv444p10le",
+            ...audio.output,
             ...rate, output,
           ],
         ],
         output,
         frameExt,
       };
+    }
     case "gif": {
       const palette = path.join(jobDir, "palette.png");
       const filters = `fps=${opts.fps},scale=${opts.width}:-1:flags=lanczos`;
@@ -166,12 +187,13 @@ export function runFfmpeg(args: string[], opts: { timeoutMs?: number } = {}): Pr
   });
 }
 
-/** Stores every frame (sorted) into `output` without re-compressing the PNG data. */
-async function zipFrames(framesDir: string, ext: FrameExt, output: string): Promise<void> {
+/** Stores every frame (sorted) into `output` without re-compressing the PNG data, plus the sound track if any. */
+async function zipFrames(framesDir: string, ext: FrameExt, output: string, audio?: string | null): Promise<void> {
   const names = (await readdir(framesDir)).filter((name) => name.endsWith(`.${ext}`)).sort();
   if (names.length === 0) throw new Error(`No .${ext} frames found in ${framesDir}`);
   const zip = new JSZip();
   for (const name of names) zip.file(name, createReadStream(path.join(framesDir, name)));
+  if (audio) zip.file("audio.wav", createReadStream(audio));
   await pipeline(zip.generateNodeStream({ type: "nodebuffer", streamFiles: true, compression: "STORE" }), createWriteStream(output));
 }
 
@@ -179,7 +201,7 @@ async function zipFrames(framesDir: string, ext: FrameExt, output: string): Prom
 export async function encode(jobDir: string, opts: EncodeOptions): Promise<string> {
   const plan = buildEncodeArgs(jobDir, opts);
   if (opts.format === "png-sequence") {
-    await zipFrames(path.join(jobDir, "frames"), plan.frameExt, plan.output);
+    await zipFrames(path.join(jobDir, "frames"), plan.frameExt, plan.output, opts.audio);
     return plan.output;
   }
   for (const args of plan.passes) await runFfmpeg(args);

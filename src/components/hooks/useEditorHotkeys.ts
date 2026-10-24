@@ -3,7 +3,8 @@
  * Global keyboard shortcuts (CONTRACTS §4): Space play/pause, ←/→ frame step,
  * Shift+←/→ one second, Delete removes the selected layer, Ctrl/Cmd+Z undo,
  * Ctrl/Cmd+Shift+Z (or Ctrl+Y) redo, Ctrl/Cmd+D duplicate, H toggle hidden,
- * Escape clears the selection. Ignored while typing in a form control.
+ * C frame-comment mode, Escape leaves comment mode or clears the selection.
+ * Ignored while typing in a form control.
  */
 import { useEffect } from "react";
 import { useEditorStore } from "@/store/editorStore";
@@ -84,8 +85,14 @@ export function useEditorHotkeys(): void {
           }
           return;
         }
+        case "c":
+        case "C":
+          event.preventDefault();
+          store.setCommentMode(!store.commentMode);
+          return;
         case "Escape":
-          store.select(null);
+          if (store.commentMode) store.setCommentMode(false);
+          else store.select(null);
           return;
         default:
           return;

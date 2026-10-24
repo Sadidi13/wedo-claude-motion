@@ -26,6 +26,10 @@ export function isEditorMessage(data: unknown): data is EditorToPreviewMessage {
       return message.id === null || typeof message.id === "string";
     case "setTransparent":
       return typeof message.transparent === "boolean";
+    case "playback":
+      return typeof message.playing === "boolean" && typeof message.muted === "boolean";
+    case "motionOverride":
+      return typeof message.id === "string" && (message.motion === null || typeof message.motion === "string");
     default:
       return false;
   }

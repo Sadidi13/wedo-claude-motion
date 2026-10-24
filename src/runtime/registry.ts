@@ -80,6 +80,7 @@ export function measureLayerRects(handle: StageHandle): LayerRect[] {
   const stageRect = stage.getBoundingClientRect();
   const scale = stageRect.width > 0 && handle.meta.width > 0 ? stageRect.width / handle.meta.width : 1;
   const rects: LayerRect[] = [];
+  const shown = visibilityWithin(stage);
   stage.querySelectorAll<HTMLElement>("[data-layer-id]").forEach((el) => {
     const id = el.getAttribute("data-layer-id");
     if (!id) return;
@@ -90,7 +91,31 @@ export function measureLayerRects(handle: StageHandle): LayerRect[] {
       y: (r.top - stageRect.top) / scale,
       width: r.width / scale,
       height: r.height / scale,
+      visible: shown(el),
     });
   });
   return rects;
+}
+
+/** Below this combined opacity an element counts as invisible (e.g. before it fades in). */
+const VISIBLE_OPACITY = 0.05;
+
+/**
+ * Whether an element is seen at the current frame: displayed, not visibility-hidden, and the
+ * product of its own and its ancestors' opacity (up to the stage) above VISIBLE_OPACITY.
+ * Per-element results are cached for one measurement.
+ */
+function visibilityWithin(stage: HTMLElement): (el: HTMLElement) => boolean {
+  const cache = new Map<Element, number>();
+  const opacityOf = (el: Element | null): number => {
+    if (!el || el === stage) return 1;
+    const known = cache.get(el);
+    if (known !== undefined) return known;
+    const style = getComputedStyle(el);
+    const own = style.display === "none" || style.visibility === "hidden" ? 0 : Number(style.opacity);
+    const combined = own * opacityOf(el.parentElement);
+    cache.set(el, combined);
+    return combined;
+  };
+  return (el) => opacityOf(el) > VISIBLE_OPACITY;
 }

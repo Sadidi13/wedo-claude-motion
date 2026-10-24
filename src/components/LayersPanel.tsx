@@ -6,7 +6,7 @@
  * kind icon · name (double-click to rename) · timing badge · eye · lock, with
  * hover actions and a right-click menu for duplicate / delete / bring
  * forward / send backward / wrap in Sprite. The header inserts Text / Image /
- * Shape layers at the playhead.
+ * Shape layers and Sound (an audio file or a built-in sound effect) at the playhead.
  */
 import {
   ArrowDown,
@@ -26,14 +26,19 @@ import {
   Image as ImageIcon,
   Lock,
   LockOpen,
+  Music,
+  Repeat,
   Shapes,
   Square,
   Trash2,
   Type,
+  Upload,
+  Volume2,
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { SFX } from "@/lib/audio/sfx";
 import type { LayerKind, LayerNode } from "@/lib/types";
 import { useEditorStore } from "@/store/editorStore";
 import { flattenLayers, hasLiteralTiming, sourceDirectionFor, type LayerRow } from "@/store/layerRows";
@@ -52,6 +57,7 @@ const KIND_ICON: Record<LayerKind, LucideIcon> = {
   canvas: Cuboid,
   component: Component,
   element: Box,
+  audio: Volume2,
 };
 
 const EMPTY_LAYERS: LayerNode[] = [];
@@ -82,7 +88,7 @@ function layerMenuItems(node: LayerNode): ContextMenuItem[] {
       label: "Wrap in Sprite",
       icon: <Clapperboard size={14} />,
       onSelect: () => store.wrapInSprite(node.id, node.range.start, node.range.end),
-      disabled: node.kind === "sprite" || node.locked,
+      disabled: node.kind === "sprite" || node.kind === "audio" || node.locked,
       separator: true,
     },
     { label: node.hidden ? "Show" : "Hide", icon: node.hidden ? <Eye size={14} /> : <EyeOff size={14} />, onSelect: () => store.setHidden(node.id, !node.hidden) },
@@ -168,7 +174,7 @@ function LayerRowItem({ row, selected, renaming, onRename, onMenu }: RowProps) {
       >
         {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
       </button>
-      <Icon size={14} className={cx("shrink-0", node.kind === "sprite" ? "text-accent" : "text-muted")} />
+      <Icon size={14} className={cx("shrink-0", node.kind === "sprite" ? "text-accent" : node.kind === "audio" ? "text-success" : "text-muted")} />
       {renaming ? (
         <RenameInput node={node} onDone={() => onRename(null)} />
       ) : (
@@ -236,10 +242,13 @@ export function LayersPanel() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [shapeMenu, setShapeMenu] = useState<{ x: number; y: number } | null>(null);
+  const [soundMenu, setSoundMenu] = useState<{ x: number; y: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const closeShapeMenu = useCallback(() => setShapeMenu(null), []);
+  const closeSoundMenu = useCallback(() => setSoundMenu(null), []);
 
   useEffect(() => {
     if (!selectedId || !listRef.current) return;
@@ -256,16 +265,13 @@ export function LayersPanel() {
         <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Layers</span>
         <span className="font-mono text-[10px] text-muted">{byId ? Object.keys(byId).length : 0}</span>
         <div className="flex-1" />
-        <Button size="sm" variant="ghost" icon={<Type size={14} />} title="Add a text layer at the playhead" disabled={disabled} onClick={() => store.addTextLayer()}>
-          Text
-        </Button>
-        <Button size="sm" variant="ghost" icon={<ImageIcon size={14} />} title="Add an image layer at the playhead" disabled={disabled} onClick={() => fileInputRef.current?.click()}>
-          Image
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          icon={<Shapes size={14} />}
+        <IconButton title="Add a text layer at the playhead" disabled={disabled} onClick={() => store.addTextLayer()}>
+          <Type size={14} />
+        </IconButton>
+        <IconButton title="Add an image layer at the playhead" disabled={disabled} onClick={() => fileInputRef.current?.click()}>
+          <ImageIcon size={14} />
+        </IconButton>
+        <IconButton
           title="Add a shape layer at the playhead"
           disabled={disabled}
           onClick={(event) => {
@@ -273,8 +279,33 @@ export function LayersPanel() {
             setShapeMenu({ x: rect.left, y: rect.bottom + 2 });
           }}
         >
-          Shape
+          <Shapes size={14} />
+        </IconButton>
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<Music size={14} />}
+          title="Add sound at the playhead: an audio file or a built-in sound effect"
+          disabled={disabled}
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            setSoundMenu({ x: rect.left, y: rect.bottom + 2 });
+          }}
+        >
+          Sound
         </Button>
+        <input
+          ref={audioInputRef}
+          type="file"
+          accept="audio/*"
+          className="hidden"
+          aria-label="Audio file"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void store.addAudioLayer(file);
+          }}
+        />
         <input
           ref={fileInputRef}
           type="file"
@@ -316,6 +347,22 @@ export function LayersPanel() {
           items={[
             { label: "Rectangle", icon: <Square size={14} />, onSelect: () => store.addShapeLayer("rect") },
             { label: "Circle", icon: <Circle size={14} />, onSelect: () => store.addShapeLayer("circle") },
+          ]}
+        />
+      )}
+      {soundMenu && (
+        <ContextMenu
+          x={soundMenu.x}
+          y={soundMenu.y}
+          onClose={closeSoundMenu}
+          items={[
+            { label: "Audio file…", icon: <Upload size={14} />, onSelect: () => audioInputRef.current?.click() },
+            ...Object.entries(SFX).map(([name, sound], index) => ({
+              label: `${sound.label} · ${sound.duration < 1 ? sound.duration.toFixed(1) : Number(sound.duration.toFixed(1))}s`,
+              icon: sound.loop ? <Repeat size={14} /> : <Volume2 size={14} />,
+              onSelect: () => store.addSfxLayer(name),
+              separator: index === 0,
+            })),
           ]}
         />
       )}

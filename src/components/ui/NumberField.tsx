@@ -19,6 +19,8 @@ interface NumberFieldProps {
   className?: string;
   id?: string;
   decimals?: number;
+  /** accessible name when no <label> points at the input */
+  label?: string;
 }
 
 function format(value: number, decimals: number): string {
@@ -26,7 +28,7 @@ function format(value: number, decimals: number): string {
   return String(Number(value.toFixed(decimals)));
 }
 
-export function NumberField({ value, onCommit, min, max, step, suffix, disabled, title, className, id, decimals = 3 }: NumberFieldProps) {
+export function NumberField({ value, onCommit, min, max, step, suffix, disabled, title, className, id, decimals = 3, label }: NumberFieldProps) {
   const autoId = useId();
   const [draft, setDraft] = useState(() => format(value, decimals));
   const [seen, setSeen] = useState(value);
@@ -73,6 +75,7 @@ export function NumberField({ value, onCommit, min, max, step, suffix, disabled,
         step={step}
         disabled={disabled}
         title={title}
+        aria-label={label}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
         onKeyDown={onKeyDown}

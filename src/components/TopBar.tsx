@@ -4,11 +4,12 @@
  * (project .zip), Undo / Redo, stage readout, the preview-error pill (click
  * to expand the message + stack) and transient notices from the store.
  */
-import { Download, Film, FolderOpen, Redo2, Save, TriangleAlert, Undo2, X } from "lucide-react";
+import { Download, Film, FolderOpen, History, LayoutGrid, Redo2, Save, ShieldCheck, TriangleAlert, Undo2, X } from "lucide-react";
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { DISCLAIMER, PRODUCT_NAME } from "@/lib/brand";
 import { exportProjectZip } from "@/lib/importer";
+import { useBoardStore } from "@/store/boardStore";
 import { errorMessage, useEditorStore } from "@/store/editorStore";
 import { Button } from "./ui/Button";
 import { cx } from "./ui/cx";
@@ -18,6 +19,10 @@ import { IconButton } from "./ui/IconButton";
 interface TopBarProps {
   onImport: () => void;
   onExport: () => void;
+  /** the quality check (QualityDialog) */
+  onCheck: () => void;
+  /** version history (HistoryDialog) */
+  onHistory: () => void;
 }
 
 const NOTICE_TTL_MS = 5000;
@@ -66,7 +71,7 @@ function ProjectName({ name, onRename }: { name: string; onRename: (name: string
   );
 }
 
-export function TopBar({ onImport, onExport }: TopBarProps) {
+export function TopBar({ onImport, onExport, onCheck, onHistory }: TopBarProps) {
   const { project, meta, canUndo, canRedo, previewError, previewErrorDetail, notice, parseError } = useEditorStore(
     useShallow((s) => ({
       project: s.project,
@@ -102,6 +107,19 @@ export function TopBar({ onImport, onExport }: TopBarProps) {
     }
   };
 
+  /** Reopen the newest storyboard (docs/STORYBOARD.md). */
+  const openStoryboard = async () => {
+    try {
+      const response = await fetch("/api/bridge/boards", { cache: "no-store" });
+      const body = (await response.json().catch(() => null)) as { boards?: { id: string }[] } | null;
+      const latest = body?.boards?.[0];
+      if (latest) useBoardStore.getState().open(latest.id);
+      else setNotice({ kind: "info", message: "No storyboard yet. Ask Claude for a new video, or use Ask Claude → New scene." });
+    } catch (error) {
+      setNotice({ kind: "error", message: `Could not load storyboards: ${errorMessage(error)}` });
+    }
+  };
+
   const errorText = parseError ? `Scene does not parse: ${parseError}` : previewError;
 
   return (
@@ -123,6 +141,12 @@ export function TopBar({ onImport, onExport }: TopBarProps) {
         <Button size="sm" icon={<Save size={14} />} onClick={saveZip} disabled={!project} loading={saving} title="Save the project as a .zip">
           Save
         </Button>
+        <Button size="sm" icon={<LayoutGrid size={14} />} onClick={() => void openStoryboard()} title="Open the latest storyboard (style frames and shots)">
+          Storyboard
+        </Button>
+        <Button size="sm" icon={<ShieldCheck size={14} />} onClick={onCheck} disabled={!project} title="Render on this computer and check for cut-off, overlapping or hard-to-read text, empty or frozen stretches">
+          Check
+        </Button>
       </div>
 
       <div className="ml-1 flex items-center">
@@ -131,6 +155,9 @@ export function TopBar({ onImport, onExport }: TopBarProps) {
         </IconButton>
         <IconButton title="Redo (Ctrl+Shift+Z)" onClick={redo} disabled={!canRedo}>
           <Redo2 size={16} />
+        </IconButton>
+        <IconButton title="Version history" onClick={onHistory} disabled={!project}>
+          <History size={16} />
         </IconButton>
       </div>
 

@@ -74,6 +74,11 @@ Rules (the AI system prompt and the importer both enforce / assume these):
   `./animations`, `@motion/runtime`, `motion-runtime`), and relative project files (`./Card.jsx`,
   `./styles.css`). Anything else fails to load with a clear error.
 * Assets are referenced by relative path (`assets/logo.png`); the loader rewrites them to data URLs.
+* `data-motion='{…}'` on any element is the designer's move / scale / rotate / opacity, static or
+  keyframed, applied by the runtime on top of the element's own styles (docs/TRANSFORM.md). Code
+  that edits a scene keeps these attributes as they are.
+* Sound is an `<Audio src|sfx start end …>` element in the Stage, one layer per clip
+  (docs/AUDIO.md); its `start` / `end` are literals like a Sprite's.
 
 ### Runtime API (`src/runtime/motion.tsx`) — exports
 
@@ -90,12 +95,14 @@ Rules (the AI system prompt and the importer both enforce / assume these):
 | `animate({ from, to, start, end, ease? })` | `(t:number)=>number` | single tween, default `Easing.easeInOutCubic` |
 | `clamp(v, min, max)`, `lerp(a, b, t)` | helpers | |
 | `Three3D` | `({ setup?, render?, width?, height?, camera?, textures?, antialias=true, autoRender=true, style, ...data-* })` | one three.js scene on one WebGL canvas = **one layer** (`src/runtime/three.tsx`). Renders `<div data-three3d style="position:absolute;left:0;top:0;width;height">` (default size: the Stage) carrying the `data-*` props, with the canvas inside. See "3D scenes" below. |
+| `Audio` | `({ src?, sfx?, start=0, end?, from=0, volume=1, fadeIn=0, fadeOut=0, loop=false, ...data-* })` | one sound clip = **one layer** (`src/runtime/audio.tsx`). Renders a hidden marker `<span data-audio>` with the `data-*` props. Plays in sync with the editor's playback; records itself for the export mix in render mode. `sfx` names a built-in sound (`src/lib/audio/sfx.ts`). See docs/AUDIO.md. |
 | `useGsapTimeline` | `(build: (tl, scope) => void, deps = []) => RefObject` | one paused GSAP timeline scoped to the element the returned ref is attached to, seeked to the Sprite's local time (stage time outside a Sprite) on every render (`src/runtime/gsap.tsx`). See "GSAP" below. |
 
 Globals the runtime installs on `window` when a Stage mounts:
 `__videoMeta = { width, height, duration, fps }`, `__seek(t)`, `__ready = true`,
 `__getLayerRects(): LayerRect[]` (bounding boxes of every `[data-layer-id]` in stage coordinates),
 `__setTransparent(bool)` (toggles the Stage background off for alpha export),
+`__getAudioClips(): AudioClip[]` (the `<Audio>` clips rendered so far, for the export mix),
 `__whenIdle(): Promise<void>` (resolves once work the current frame waits for — web fonts before a
 `<Three3D>` setup or a `useGsapTimeline` build, `<Three3D>` textures — is drawn; `src/runtime/pending.ts`).
 
@@ -250,17 +257,21 @@ export function setLayerLocked(source: string, id: string, locked: boolean): str
 export function setLayerName(source: string, id: string, name: string): string;
 export function insertLayer(source: string, parentId: string | null, jsx: string, index?: number): { source: string; id: string }; // index undefined = append
 export function setStageMeta(source: string, meta: Partial<StageMeta>): string;
+export function setLayerAttribute(source: string, id: string, name: string, value: number | string | boolean | null): string; // one JSX attribute as a literal; null removes it
+export function setLayerMotion(source: string, id: string, spec: MotionSpec | null): string;   // writes (or, null, removes) data-motion
 export function listLayerIds(source: string): string[];
 ```
 
 Layer naming rule (`LayerNode.name`): `data-layer-name` > for text elements the first 24 chars of text
 > `<Tag>`; Sprite with a single element child may borrow that child's text for the preview.
 `LayerNode.kind`: `Sprite` ⇒ `sprite`; `img|Image|video` ⇒ `image`; `svg|path|circle|rect|...` ⇒ `shape`;
-`Three3D|canvas` ⇒ `canvas` (one drawn layer: the meshes inside a 3D scene are not layers, and JSX in
+`Audio` ⇒ `audio` (timed like a Sprite; without `end` a built-in sound lasts its own length;
+`LayerNode.audio` holds its literal props); `Three3D|canvas` ⇒ `canvas` (one drawn layer: the meshes inside a 3D scene are not layers, and JSX in
 its `setup` / `render` props is a prop value, not a sub-layer); capitalised tag ⇒ `component`; element whose children are only text/expressions ⇒ `text`;
 element with element children ⇒ `group`; else `element`.
 `range` = intersection of own Sprite timing with the nearest ancestor Sprite range; non-Sprite
 elements inherit the parent range; root default is `[0, meta.duration]`.
+`LayerNode.motion` is the parsed `data-motion` (`MotionSpec`, `src/lib/motion/keyframes.ts`), when present.
 
 Also exported: `class ParseError extends Error { line?: number; column?: number }`.
 
@@ -309,8 +320,10 @@ postMessage protocol (types in `types.ts`):
 | editor→preview | `{type:"getLayerRects"}` | reply `layerRects` (stage coordinates) |
 | editor→preview | `{type:"highlight", id}` | draw a 1px outline on that layer (preview-side overlay, not in export) |
 | editor→preview | `{type:"setTransparent", transparent}` | toggle background |
+| editor→preview | `{type:"playback", playing, muted}` | `<Audio>` clips play, pause or mute with the editor |
+| editor→preview | `{type:"motionOverride", id, motion}` | live `data-motion` (JSON string, or null to clear) while a transform handle is dragged |
 | preview→editor | `{type:"select", id}` | user clicked inside the canvas: deepest `[data-layer-id]` under pointer (`null` for empty area) |
-| preview→editor | `{type:"ready"|"layerRects"|"error"|"warning"}` | as above |
+| preview→editor | `{type:"ready"|"layerRects"|"error"|"warning"}` | as above; each `LayerRect` may carry `visible` (shown at this frame) |
 
 Runtime errors thrown while rendering (React error boundary) are posted as `error` and shown in
 the editor; the previous good frame stays visible.
@@ -343,6 +356,9 @@ interface EditorState {
   setHidden(id, hidden); setLocked(id, locked); renameLayer(id, name); wrapInSprite(id, start, end);
   insertLayer(parentId, jsx, index?); replaceLayer(id, jsx); setStageMeta(partial);
   addTextLayer(); addImageLayer(file); addShapeLayer(kind); // built-in templates inserted at the playhead, 2s long
+  addAudioLayer(file); addSfxLayer(name);                   // <Audio> at the playhead (file length / sound length)
+  setAttribute(id, name, value); setMotion(id, spec);       // one attribute; data-motion (docs/TRANSFORM.md)
+  muted: boolean; toggleMuted(); commentMode: boolean; setCommentMode(on);
   undo(); redo();
   updateFile(path, content); addFile(file); removeFile(path);
 }
@@ -359,7 +375,10 @@ source of the selected layer with Apply), **Ask Claude** (prompt, scope toggle l
 Apply/Undo) · bottom Timeline (ruler, playhead, one track per layer in tree order with expand/collapse,
 clip bars draggable to move and trim, snapping to frames, play/pause, loop, time readout, zoom).
 Keyboard: Space play/pause, ←/→ frame step, Shift+←/→ 1s, Delete removes selected layer,
-Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z undo/redo, Ctrl/Cmd+D duplicate, H toggle hidden.
+Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z undo/redo, Ctrl/Cmd+D duplicate, H toggle hidden, C frame comment,
+Escape leaves comment mode.
+Top bar also has **Storyboard** (docs/STORYBOARD.md), **Check** (docs/QUALITY.md) and **History**
+(docs/VERSIONS.md); the canvas draws transform handles for the selected layer (docs/TRANSFORM.md).
 Dark UI, English labels, Tailwind v4, lucide-react icons. Must look like a real tool, not a demo.
 
 ---

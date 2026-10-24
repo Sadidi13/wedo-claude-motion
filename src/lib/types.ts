@@ -61,6 +61,7 @@ export interface Project {
 
 export type LayerKind =
   | "sprite" // <Sprite start end>
+  | "audio" // <Audio src|sfx start end>: a sound clip, timed like a Sprite
   | "text" // element whose only children are text/expressions
   | "image" // <img> / <Image>
   | "shape" // <svg>, <div> with no text children, <circle> …
@@ -87,8 +88,8 @@ export interface LayerNode {
   /** JSX element name as written ("Sprite", "div", "Title", "svg"...) */
   tag: string;
   /**
-   * Timing declared on THIS element (only for `<Sprite start end>` whose props are numeric literals).
-   * `undefined` when not a Sprite or when the prop is a dynamic expression.
+   * Timing declared on THIS element (only for `<Sprite start end>` / `<Audio start end>` whose props are
+   * numeric literals). `undefined` when not timed or when the prop is a dynamic expression.
    */
   start?: number;
   end?: number;
@@ -105,6 +106,20 @@ export interface LayerNode {
   children: LayerNode[];
   /** source range of the whole JSX element (opening tag → closing tag) in the entry file */
   loc: SourceRange;
+  /** <Audio> clips: the literal props the inspector edits (undefined = not literal / not set) */
+  audio?: LayerAudio;
+  /** the editor's move / scale / rotate / opacity (static or keyframed) from `data-motion` */
+  motion?: import("@/lib/motion/keyframes").MotionSpec;
+}
+
+export interface LayerAudio {
+  src?: string;
+  sfx?: string;
+  from?: number;
+  volume?: number;
+  fadeIn?: number;
+  fadeOut?: number;
+  loop: boolean;
 }
 
 export interface ParsedScene {
@@ -130,6 +145,8 @@ export interface LayerRect {
   y: number;
   width: number;
   height: number;
+  /** seen at the current frame (displayed, not hidden, combined opacity above ~5%); absent = unknown */
+  visible?: boolean;
 }
 
 /** editor -> preview iframe */
@@ -138,7 +155,11 @@ export type EditorToPreviewMessage =
   | { type: "seek"; time: number }
   | { type: "getLayerRects" }
   | { type: "highlight"; id: string | null }
-  | { type: "setTransparent"; transparent: boolean };
+  | { type: "setTransparent"; transparent: boolean }
+  /** the editor's transport: <Audio> layers play while it plays (and not when muted) */
+  | { type: "playback"; playing: boolean; muted: boolean }
+  /** live layer motion while the designer drags (a data-motion JSON); null returns to the code's own */
+  | { type: "motionOverride"; id: string; motion: string | null };
 
 /** preview iframe -> editor */
 export type PreviewToEditorMessage =
@@ -213,6 +234,8 @@ export interface ExportOptions {
   transparent?: boolean;
   /** H.264 CRF for mp4 (default 17) */
   quality?: number;
+  /** mix the project's <Audio> layers into the file (default true; gif never has sound) */
+  audio?: boolean;
 }
 
 export interface ExportRequest {
@@ -269,6 +292,116 @@ export interface BridgeStatus {
 
 export type BridgeRequestState = "pending" | "claimed" | "done" | "error" | "cancelled";
 
+// ---------------------------------------------------------------------------
+// Storyboard boards (docs/STORYBOARD.md): every new video goes style frames →
+// storyboard → approved build. Boards live in the bridge state folder.
+// ---------------------------------------------------------------------------
+
+/** One style direction, shown as a single key frame rendered from its own scene code. */
+export interface BoardStyle {
+  /** "a", "b", … in proposal order */
+  id: string;
+  name: string;
+  /** why it fits the brief, one sentence */
+  description: string;
+  /** complete entry file (validated like a new scene) */
+  code: string;
+  files?: { path: string; content: string }[];
+  /** second of `code` that shows the key frame */
+  time: number;
+}
+
+export interface BoardShot {
+  /** "s1", "s2", … in order */
+  id: string;
+  title: string;
+  /** seconds in the final video */
+  start: number;
+  end: number;
+  /** what we see and how it moves */
+  action: string;
+  /** on-screen text, exactly as it will appear */
+  text?: string;
+  /** music / sound-effect cue */
+  audio?: string;
+  /** optional still sketch of the shot in the chosen style (complete entry file) */
+  code?: string;
+  files?: { path: string; content: string }[];
+  /** second of `code` to show */
+  time?: number;
+}
+
+/** An image or video the designer gave as a reference for the look (docs/STORYBOARD.md). */
+export interface BoardReference {
+  /** "r1", "r2", … */
+  id: string;
+  /** the file's name as uploaded (display only) */
+  name: string;
+  kind: "image" | "video";
+  /** stored file name, r<n>.<ext> */
+  file: string;
+  /** JPEG Claude looks at: the downscaled image, or a contact sheet of the video's frames */
+  preview: string;
+  /** video only: seconds */
+  duration?: number;
+  /** video only: the times of the sheet's frames, left to right, top to bottom */
+  frames?: number[];
+}
+
+export type BoardStatus =
+  | "styles-pending" // waiting for Claude's style frames
+  | "choose-style" // the designer picks one
+  | "storyboard-pending" // waiting for Claude's storyboard
+  | "storyboard" // the designer approves it or asks for changes
+  | "build-pending" // approved: waiting for Claude to build the video
+  | "built";
+
+/** What the designer (or Claude, on the designer's word in the chat) did with a board. */
+export type BoardAction = "new" | "choose-style" | "restyle" | "revise-storyboard" | "approve";
+
+export interface BoardNote {
+  at: string;
+  stage: "styles" | "storyboard" | "build";
+  text: string;
+}
+
+export interface Board {
+  id: string;
+  title: string;
+  /** the request the video is made for */
+  brief: string;
+  meta: StageMeta;
+  status: BoardStatus;
+  styles: BoardStyle[];
+  chosenStyleId: string | null;
+  shots: BoardShot[];
+  /** Claude's notes on the storyboard (music, pacing) */
+  storyboardNotes: string;
+  /** increments each time Claude proposes styles / a storyboard */
+  stylesRevision: number;
+  storyboardRevision: number;
+  /** the designer's notes, oldest first */
+  notes: BoardNote[];
+  /** reference images / videos for the look (absent on boards saved before references existed) */
+  references?: BoardReference[];
+  /** project made from this board, once built */
+  projectId: string | null;
+  /** the request queued for Claude about this board's current step, until Claude answers it */
+  waitingRequestId: string | null;
+  /** why Claude declined the last step, shown on the board */
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Board list entry (GET /api/bridge/boards). */
+export interface BoardSummary {
+  id: string;
+  title: string;
+  status: BoardStatus;
+  updatedAt: string;
+}
+
 /** What the editor sees when it polls one request (the request body itself is not echoed back). */
 export interface BridgeRequestView {
   id: string;
@@ -284,7 +417,15 @@ export interface BridgeRequestView {
 
 /** Changes Claude pushed from the desktop chat, delivered to the open editor in order. */
 export type BridgeEvent =
-  | { id: string; at: string; type: "project"; project: Project; summary: string }
+  | { id: string; at: string; type: "project"; project: Project; summary: string; boardId?: string }
+  | {
+      id: string;
+      at: string;
+      /** a storyboard step is ready for the designer: the editor opens the board */
+      type: "board";
+      boardId: string;
+      summary: string;
+    }
   | {
       id: string;
       at: string;

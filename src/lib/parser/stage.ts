@@ -17,6 +17,7 @@ import { ParseError } from "./errors";
 
 const STAGE_TAG = "Stage";
 const SPRITE_TAG = "Sprite";
+const AUDIO_TAG = "Audio";
 
 export function isStageTag(tag: string): boolean {
   return tagBaseName(tag) === STAGE_TAG;
@@ -24,6 +25,16 @@ export function isStageTag(tag: string): boolean {
 
 export function isSpriteTag(tag: string): boolean {
   return tagBaseName(tag) === SPRITE_TAG;
+}
+
+/** The runtime's <Audio> (a sound clip layer). */
+export function isAudioTag(tag: string): boolean {
+  return tagBaseName(tag) === AUDIO_TAG;
+}
+
+/** Elements whose `start` / `end` literals are their timing on the timeline: <Sprite> and <Audio>. */
+export function isTimedTag(tag: string): boolean {
+  return isSpriteTag(tag) || isAudioTag(tag);
 }
 
 export interface WalkedElement {

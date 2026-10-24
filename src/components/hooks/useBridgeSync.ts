@@ -11,12 +11,15 @@
  *     scenes / edits Claude pushed (that poll is also the editor's heartbeat),
  *   - in every tab: polls /api/bridge/status for the Ask Claude tab, and the one
  *     Ask Claude request this tab queued, applying its answer.
+ *   - storyboard steps Claude delivers ("board" events, docs/STORYBOARD.md) open the
+ *     storyboard view in the leading tab; ?board=<id> opens one on load.
  *
  * Without the Web Locks API (very old browsers) every tab leads, as before.
  */
 import { useEffect } from "react";
 import type { AiEditResponse, BridgeEvent, BridgeRequestView, BridgeStatus } from "@/lib/types";
 import { applyAiResult } from "@/store/aiApply";
+import { useBoardStore } from "@/store/boardStore";
 import { useBridgeStore } from "@/store/bridgeStore";
 import { chatKeyFor, errorMessage, useEditorStore } from "@/store/editorStore";
 
@@ -44,11 +47,17 @@ function shorten(text: string, max = 90): string {
 
 function applyEvent(event: BridgeEvent): void {
   const store = useEditorStore.getState();
+  if (event.type === "board") {
+    useBoardStore.getState().open(event.boardId);
+    return;
+  }
   if (event.type === "project") {
     store.loadProject(event.project);
     const loaded = useEditorStore.getState();
     loaded.appendChat("scene", { role: "assistant", content: event.summary, status: "applied" });
     loaded.setNotice({ kind: "info", message: `Claude created “${event.project.name}”` });
+    // The video a storyboard was approved for: close the board, the project is what matters now.
+    if (event.boardId && useBoardStore.getState().openId === event.boardId) useBoardStore.getState().close();
     return;
   }
   if (store.project?.id !== event.projectId) {
@@ -191,6 +200,13 @@ export function useBridgeSync(): void {
     // 3b. Opened by Claude with ?event=<id> (no editor tab was open): this tab leads and applies it once.
     //     Opened by the start / open command with ?lead=1: the user is looking at this tab, so it leads.
     const params = new URLSearchParams(window.location.search);
+    const boardParam = params.get("board");
+    if (boardParam && EVENT_ID.test(boardParam)) {
+      useBoardStore.getState().open(boardParam);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("board");
+      window.history.replaceState(null, "", url.toString());
+    }
     const opened = params.get("event");
     const openedByClaude = opened !== null && EVENT_ID.test(opened) && !appliedFromUrl.has(opened);
     if (leadFromUrl === null) {

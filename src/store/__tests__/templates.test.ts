@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { insertLayer, parseScene } from "@/lib/parser";
 import {
   assetPathFor,
+  audioLayerTemplate,
   clipAtPlayhead,
+  ensureRuntimeImport,
   ensureSpriteImport,
   imageLayerTemplate,
   shapeLayerTemplate,
@@ -81,5 +83,26 @@ describe("ensureSpriteImport", () => {
   it("does nothing when Sprite is declared locally", () => {
     const local = `const Sprite = (p) => <div {...p} />;\nexport default () => <Stage><Sprite /></Stage>;`;
     expect(ensureSpriteImport(local)).toBe(local);
+  });
+});
+
+describe("audioLayerTemplate", () => {
+  it("writes a sound clip that parses as an audio layer", () => {
+    const sfx = audioLayerTemplate({ sfx: "whoosh", start: 1.5, name: "Whoosh" });
+    expect(sfx).toBe('<Audio sfx="whoosh" start={1.5} data-layer-name="Whoosh" />');
+    const file = audioLayerTemplate({ src: "assets/music.mp3", start: 0, end: 8, volume: 0.6, loop: true, name: 'Music "final"' });
+    expect(file).toBe('<Audio src="assets/music.mp3" start={0} end={8} volume={0.6} loop data-layer-name="Music &quot;final&quot;" />');
+    const { source, id } = insertLayer(ensureRuntimeImport(SCENE, "Audio"), null, file);
+    expect(parseScene(source).byId[id]).toMatchObject({ kind: "audio", name: 'Music "final"', range: { start: 0, end: 8 } });
+  });
+});
+
+describe("ensureRuntimeImport", () => {
+  it("adds any runtime name to the existing import, once", () => {
+    const out = ensureRuntimeImport(SCENE, "Audio");
+    expect(out).toContain('import { Stage, Sprite, Easing, Audio } from "./animations.jsx";');
+    expect(ensureRuntimeImport(out, "Audio")).toBe(out);
+    const aliased = SCENE.replace("{ Stage, Sprite, Easing }", "{ Stage, Sprite, Easing, Audio as Sound }");
+    expect(ensureRuntimeImport(aliased, "Audio")).toBe(aliased);
   });
 });

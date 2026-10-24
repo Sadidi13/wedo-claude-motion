@@ -30,6 +30,9 @@ useBridgeSync ── GET requests/<id> ─ (state, result) ◄── POST …/re
   Microsoft Store apps such as Claude Desktop give their child processes a redirected view of
   AppData, so the connector could read a different copy than the server. Ids are time-ordered, so "oldest pending request" and
   "events after cursor" are a sorted directory listing.
+- New videos go through a storyboard first (style frames, then shots, then the build): see
+  [STORYBOARD.md](STORYBOARD.md). A storyboard step reaches Claude as a request like any other, with
+  its own brief.
 - `src/lib/server/bridge/` holds the store and the operations; `src/app/api/bridge/` holds the routes;
   `scripts/motion-bridge.mjs` is the CLI; `.claude/skills/motion-studio/SKILL.md` teaches Claude the
   workflow.
@@ -56,6 +59,10 @@ and starts `wait` again.
 | … · busy | nobody polls, but a request is claimed |
 | … · between requests | polled in the last 90 s; the answer is being written, polling resumes next |
 | Claude · offline | nothing for longer; requests queue until something listens again |
+
+Frame comments (**Comment** on the canvas, or C) and the quality check's **Ask Claude to fix** go
+through the same queue as the Ask Claude tab ([TRANSFORM.md](TRANSFORM.md#comments-on-the-frame),
+[QUALITY.md](QUALITY.md)).
 
 The heartbeat records who polled (`listenerClient`: `cli`, `mcp` or `headless`), which is how the
 editor names the autopilot. Run only one listener at a time: whichever polls first claims a request.
@@ -114,7 +121,13 @@ file by hand.
 | `start_motion_studio` | runs `pnpm dev` in the repo if needed and opens the editor |
 | `get_authoring_guide` | the authoring contract (read once per conversation) |
 | `get_open_project` | the open project's entry file and text files |
-| `create_scene` | new layered scene → new project in the editor |
+| `get_style_library` | the style library: directions with recipes, for choosing style frames |
+| `propose_styles` | 3 style frames of a new video (a new storyboard, or the one the editor started) |
+| `get_board` / `get_board_references` | a storyboard with its chosen style and notes; its reference images |
+| `propose_storyboard` | the shots in the chosen style, with sketches |
+| `record_decision` | a choice the designer made in the chat (choose, restyle, revise, approve) |
+| `create_scene` | the approved storyboard's video → new project in the editor (`board_id`) |
+| `check_quality` | renders the last scene or edit locally and lists layout and readability problems |
 | `edit_scene` | edit the open project: whole entry file, or one element with `layer_id` |
 | `wait_for_request` | next Ask Claude request from the editor; waits up to 45 s (0 = only queued) |
 | `answer_request` / `decline_request` | answer or decline a request |
@@ -144,7 +157,16 @@ below, so no skill is needed in the chat.
 | `POST /api/bridge/requests/[id]/result` | CLI, token | answer `{ summary, code, files? }` or decline `{ error }` |
 | `GET /api/bridge/events?after=` | editor | scenes and edits pushed from the chat |
 | `POST /api/bridge/events` | CLI, token | push `{ type: "project", name, … }` or `{ type: "edit", layerId?, … }` |
-| `GET /api/bridge/contract` | CLI | the authoring contract (the API system prompt) |
+| `GET /api/bridge/contract` | CLI | the authoring contract (the API system prompt); `?part=styles` the style library |
+| `GET /api/bridge/boards` | editor | storyboards, newest first |
+| `POST /api/bridge/boards` | CLI, token | style frames: a new board, or `boardId` to fill one the editor started |
+| `POST /api/bridge/boards/start` | editor | **New scene** in Ask Claude: an empty board and a queued style step |
+| `GET /api/bridge/boards/[id]` | editor, CLI | one board |
+| `POST /api/bridge/boards/[id]` | editor, or CLI with token | a decision; from the editor it queues Claude's next step |
+| `POST /api/bridge/boards/[id]/storyboard` | CLI, token | the shots with sketches |
+| `POST /api/bridge/boards/[id]/references` | editor | attach reference images or videos |
+| `GET /api/bridge/boards/[id]/refs/[file]` | editor | a reference or its preview |
+| `POST /api/bridge/qa` | CLI, token | quality check of a pushed scene or the edited project |
 
 ## Finding the server, and one editor tab
 
@@ -198,8 +220,18 @@ node scripts/motion-bridge.mjs project                       # → .motion-bridg
 node scripts/motion-bridge.mjs wait                          # blocks until a request arrives
 node scripts/motion-bridge.mjs respond <id> --summary "…" --code answer.jsx [--file styles.css=./styles.css]
 node scripts/motion-bridge.mjs fail <id> "reason"
-node scripts/motion-bridge.mjs new scene.jsx --name "Teaser" --summary "…"
+node scripts/motion-bridge.mjs styles                        # → .motion-bridge/style-library.md
+node scripts/motion-bridge.mjs reference clip.mp4            # contact sheet of a reference video
+node scripts/motion-bridge.mjs board-styles styles.json [--board <id>]
+node scripts/motion-bridge.mjs board [<id>]                  # → .motion-bridge/boards/<id>/
+node scripts/motion-bridge.mjs board-storyboard <id> storyboard.json
+node scripts/motion-bridge.mjs board-choose <id> <style> [--note "…"]   # or board-restyle / board-revise / board-approve
+node scripts/motion-bridge.mjs new scene.jsx --board <id> --name "Teaser" --summary "…"
+node scripts/motion-bridge.mjs qa                            # quality check of what you just sent
 node scripts/motion-bridge.mjs edit scene.jsx --summary "…" [--prompt "…"] [--layer <data-layer-id>]
 ```
+
+`new` refuses a scene without `--board` (an approved storyboard) unless `--skip-storyboard` is given,
+which is for when the user asked for no storyboard.
 
 `MOTION_STUDIO_URL` points the CLI at another server (default `http://localhost:3000`).

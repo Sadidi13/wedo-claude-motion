@@ -185,6 +185,34 @@ export async function getContract() {
   return result.text;
 }
 
+/**
+ * The quality check (docs/QUALITY.md) of the scene a pushed event made (`eventId`), or of the project
+ * open in the editor. Resolves with `{ report, text }`. Rendering takes a few seconds to a minute.
+ */
+export async function checkQuality(eventId) {
+  const result = await request("POST", "/api/bridge/qa", { body: eventId ? { eventId } : {}, auth: true });
+  if (result.status !== 200) throw failure(result, "quality check");
+  return result.json;
+}
+
+/** The style library with its recipes (Markdown). */
+export async function getStyleLibrary() {
+  const result = await request("GET", "/api/bridge/contract?part=styles");
+  if (result.status !== 200) throw failure(result, "style library");
+  return result.text;
+}
+
+/**
+ * A board's reference previews as `{ ref, file }` with absolute paths (the server and these tools
+ * share the bridge folder, so the files are read straight from it).
+ */
+export function boardReferenceFiles(board) {
+  if (!BOARD_ID.test(board.id)) return [];
+  return (board.references ?? [])
+    .filter((ref) => /^r\d{1,2}\.preview\.jpg$/.test(ref.preview))
+    .map((ref) => ({ ref, file: path.join(BRIDGE_DIR, "refs", board.id, ref.preview) }));
+}
+
 /** `{ project, syncedAt }` — the project open in the editor. */
 export async function getProject() {
   const result = await request("GET", "/api/bridge/project", { auth: true });
@@ -226,6 +254,103 @@ export async function push(body) {
   const result = await request("POST", "/api/bridge/events", { body, auth: true });
   if (result.status !== 201) throw failure(result, body.type === "project" ? "new scene" : "edit");
   return result.json;
+}
+
+// ---------------------------------------------------------------------------
+// Storyboards (docs/STORYBOARD.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * Style frames: `{ boardId?, title?, brief?, stage?, styles: [{ name, description, time, code, files? }] }`.
+ * Without boardId a new board is created. Resolves with the board.
+ */
+export async function proposeStyles(body) {
+  const result = await request("POST", "/api/bridge/boards", { body, auth: true });
+  if (result.status !== 201) throw failure(result, "style frames");
+  return result.json.board;
+}
+
+/** Storyboard for a board with a chosen style: `{ notes?, shots: [...] }`. Resolves with the board. */
+export async function proposeStoryboard(boardId, body) {
+  const result = await request("POST", `/api/bridge/boards/${encodeURIComponent(boardId)}/storyboard`, { body, auth: true });
+  if (result.status !== 200) throw failure(result, "storyboard");
+  return result.json.board;
+}
+
+export async function getBoard(boardId) {
+  const result = await request("GET", `/api/bridge/boards/${encodeURIComponent(boardId)}`);
+  if (result.status !== 200) throw failure(result, "board");
+  return result.json;
+}
+
+/** Board summaries, newest first. */
+export async function listBoards() {
+  const result = await request("GET", "/api/bridge/boards");
+  if (result.status !== 200) throw failure(result, "boards");
+  return result.json.boards;
+}
+
+/**
+ * Record a decision the designer told Claude in the chat (`{ action, styleId?, note? }`); with the
+ * token nothing is queued, because Claude already handles the next step.
+ */
+export async function recordBoardDecision(boardId, body) {
+  const result = await request("POST", `/api/bridge/boards/${encodeURIComponent(boardId)}`, { body, auth: true });
+  if (result.status !== 200) throw failure(result, "board decision");
+  return result.json.board;
+}
+
+const BOARD_ID = /^[0-9a-z]{15}$/;
+
+/** Open the storyboard view in the browser unless an editor tab is open (it opens the board by itself). */
+export async function showBoard(boardId) {
+  if (!BOARD_ID.test(boardId)) throw new BridgeError(`Invalid board id "${boardId}"`);
+  const status = await tryStatus();
+  if (status?.editorOpen) return false;
+  openInBrowser(`${BASE}/?board=${boardId}`);
+  return true;
+}
+
+/** What Claude tells the user after delivering a storyboard step, so they know where to decide. */
+export const BOARD_NEXT_STEP = {
+  styles: {
+    fa:
+      "فریم‌های استایل در WeDo Claude Motion (پنجرهٔ Storyboard) آماده‌اند. یکی را همان‌جا انتخاب کن و بعد اینجا بنویس «کلاد موشن رو چک کن»، " +
+      "یا همین‌جا بگو کدام را می‌خواهی (با حرف یا اسمش).",
+    en:
+      'The style frames are ready in the Storyboard view of WeDo Claude Motion. Choose one there and then write "check Claude Motion" here, ' +
+      "or tell me here which one you want (by letter or name).",
+  },
+  storyboard: {
+    fa:
+      "استوری‌بورد در WeDo Claude Motion آماده است. اگر خوب است همان‌جا «Approve» را بزن و بعد اینجا بنویس «کلاد موشن رو چک کن»، " +
+      "یا همین‌جا بگو تأیید است یا چه چیزی عوض شود.",
+    en:
+      'The storyboard is ready in WeDo Claude Motion. Approve it there and then write "check Claude Motion" here, ' +
+      "or tell me here whether it is approved or what should change.",
+  },
+};
+
+/** One line per board step, for the tools' replies. */
+export function describeBoard(board) {
+  const chosen = board.styles?.find((style) => style.id === board.chosenStyleId);
+  const step = {
+    "styles-pending": "waiting for style frames",
+    "choose-style": "the designer is choosing a style",
+    "storyboard-pending": `style "${chosen?.name ?? board.chosenStyleId}" chosen; waiting for the storyboard`,
+    storyboard: "the designer is reviewing the storyboard",
+    "build-pending": "storyboard approved; waiting for the video to be built",
+    built: `built (project ${board.projectId})`,
+  }[board.status];
+  const lines = [
+    `Board "${board.title}" (${board.id}): ${step}.`,
+    `Video: ${board.meta.width}x${board.meta.height}, ${board.meta.duration}s at ${board.meta.fps} fps.`,
+  ];
+  if (board.styles?.length) lines.push(`Styles: ${board.styles.map((s) => `${s.id} "${s.name}"${s.id === board.chosenStyleId ? " (chosen)" : ""}`).join(", ")}.`);
+  if (board.shots?.length) lines.push(`Storyboard: ${board.shots.length} shots (revision ${board.storyboardRevision}).`);
+  for (const note of board.notes ?? []) lines.push(`Designer's note (${note.stage}): ${note.text}`);
+  if (board.lastError) lines.push(`Last step was declined: ${board.lastError}`);
+  return lines.join("\n");
 }
 
 export const sleep = (ms, signal) =>

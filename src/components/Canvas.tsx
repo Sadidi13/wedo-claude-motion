@@ -9,12 +9,18 @@
  *   `ready`      → clear previewError, seek to the current time
  *   time change  → `seek` (store subscription, no React re-render here)
  *   `layerRects` / `select` / `error` / `warning` → store
+ *
+ * The comment button (or C) turns on frame comments: CommentLayer covers the
+ * stage, and a click there sends a comment to Claude. The selected layer gets
+ * TransformBox handles (move / scale / rotate, written as data-motion).
  */
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, MessageSquarePlus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useEditorStore } from "@/store/editorStore";
 import { createPreviewBridge, listenToPreview, type PreviewBridge } from "@/store/previewBridge";
+import { CommentLayer } from "./CommentLayer";
+import { TransformBox } from "./TransformBox";
 import { useResizeObserver } from "./hooks/useResizeObserver";
 
 const FIT_MARGIN = 0.92;
@@ -31,8 +37,13 @@ export function Canvas() {
   const size = useResizeObserver(containerRef);
   const [frameLoaded, setFrameLoaded] = useState(false);
 
-  const { meta, selectedId, selectedName, layerRects, previewReady, hasProject, filesRevision } = useEditorStore(
+  const { meta, selectedId, selectedName, layerRects, previewReady, hasProject, filesRevision, commentMode, transformable } = useEditorStore(
     useShallow((s) => ({
+      commentMode: s.commentMode,
+      transformable: (() => {
+        const node = s.selectedId ? s.scene?.byId[s.selectedId] : undefined;
+        return Boolean(node && node.kind !== "audio" && !node.locked && !node.hidden);
+      })(),
       meta: s.scene?.meta ?? s.project?.meta ?? null,
       selectedId: s.selectedId,
       selectedName: s.selectedId ? (s.scene?.byId[s.selectedId]?.name ?? null) : null,
@@ -57,6 +68,7 @@ export function Canvas() {
           store.setPreviewReady(true);
           store.setPreviewError(null);
           bridge.seek(store.time);
+          bridge.playback(store.playing, store.muted);
           break;
         case "layerRects":
           store.setLayerRects(message.rects);
@@ -75,9 +87,10 @@ export function Canvas() {
           break;
       }
     });
-    // Seek on every time change without re-rendering the canvas.
+    // Seek on every time change without re-rendering the canvas; audio follows play / pause / mute.
     const unsubscribe = useEditorStore.subscribe((state, previous) => {
       if (state.time !== previous.time) bridge.seek(state.time);
+      if (state.playing !== previous.playing || state.muted !== previous.muted) bridge.playback(state.playing, state.muted);
     });
     return () => {
       unlisten();
@@ -111,6 +124,7 @@ export function Canvas() {
   return (
     <div
       ref={containerRef}
+      data-canvas-root=""
       tabIndex={-1}
       className="relative min-h-0 min-w-0 overflow-hidden bg-[#0c0e13] outline-none"
       onPointerDown={(event) => {
@@ -147,7 +161,10 @@ export function Canvas() {
               colorScheme: "normal",
             }}
           />
-          {selectedRect && (
+          {selectedRect && !commentMode && transformable && (
+            <TransformBox left={left} top={top} scale={scale} onPreview={(id, motion) => bridgeRef.current?.motionOverride(id, motion)} />
+          )}
+          {selectedRect && !(transformable && !commentMode) && (
             <div
               aria-hidden
               className="pointer-events-none absolute"
@@ -166,6 +183,23 @@ export function Canvas() {
             </div>
           )}
         </>
+      )}
+      {meta && previewReady && commentMode && (
+        <CommentLayer left={left} top={top} scale={scale} onDone={() => useEditorStore.getState().setCommentMode(false)} />
+      )}
+      {meta && previewReady && (
+        <button
+          type="button"
+          onClick={() => useEditorStore.getState().setCommentMode(!commentMode)}
+          title="Comment on a spot of the frame for Claude (C)"
+          aria-pressed={commentMode}
+          className={
+            "ms-focus absolute bottom-3 left-3 z-30 inline-flex items-center gap-1.5 rounded px-2 py-1 text-[11px] " +
+            (commentMode ? "bg-accent-2 font-medium text-[#0b0d14]" : "bg-panel-2/90 text-muted hover:text-foreground")
+          }
+        >
+          <MessageSquarePlus size={13} /> {commentMode ? "Commenting…" : "Comment"}
+        </button>
       )}
       {(!previewReady || !meta) && (
         <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-1.5 rounded bg-panel-2/90 px-2 py-1 text-[11px] text-muted">

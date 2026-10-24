@@ -10,7 +10,7 @@ function of time). This skill connects the chat to the running editor in both di
 command from the repository root (the folder holding `package.json` and `scripts/`):
 
 ```bash
-node scripts/motion-bridge.mjs <status|contract|project|wait|respond|fail|new|edit> ...
+node scripts/motion-bridge.mjs <status|contract|project|wait|respond|fail|new|edit|board-styles|board-storyboard|board|board-choose|board-approve|qa> ...
 ```
 
 Scratch files go in `.motion-bridge/` (git-ignored). Details: `docs/CLAUDE-DESKTOP.md`. This skill is
@@ -27,18 +27,37 @@ if the editor shows "Autopilot", do not also run `wait`.
    open http://localhost:3000 for the user.
 3. "open: nothing shared yet": no editor tab is open. Open http://localhost:3000.
 
-## 1. A new video asked for in the chat
+## 1. A new video asked for in the chat: storyboard first
 
-1. Once per session, run `contract` and read `.motion-bridge/contract.md`. Follow sections 1 to 6
-   (section 3 covers 3D scenes, section 4 GSAP).
-2. Write the scene to `.motion-bridge/drafts/<slug>.jsx`. Make every visual element its own
-   `<Sprite start={..} end={..} data-layer-name="...">` so the designer gets a clean layer list.
-3. `new .motion-bridge/drafts/<slug>.jsx --name "<short title>" --summary "<one paragraph, in the user's language>"`.
-   Helper files: add `--file styles.css=.motion-bridge/drafts/styles.css` (repeatable).
-4. A validation error means the code breaks the contract. Fix it and run `new` again.
-5. `new` starts the editor if it is not running and opens it in the browser when no editor tab is
-   open; otherwise the open tab loads the scene within about two seconds.
-6. End your reply with the next-step note `new` prints, in the user's language (Persian text as is).
+Every new video goes style frames → storyboard → build, and the designer decides each step in the
+editor's storyboard view (or tells you in the chat). Details: section 9 of the contract and
+`docs/STORYBOARD.md`. Skip it only when the user explicitly asks for no storyboard
+(then `new … --skip-storyboard`).
+
+1. Once per session, run `contract` and read `.motion-bridge/contract.md` (sections 1 to 9: 3D in
+   section 3, GSAP in 4, sound in 5, the storyboard in 9).
+2. **Style frames.** Write 3 clearly different directions to `.motion-bridge/boards/new/style-1.jsx` …
+   (each a complete scene at the video's size showing the same key moment) and
+   `.motion-bridge/boards/new/styles.json`:
+   `{ "title": "…", "brief": "<the user's request>", "stage": { "width": 1080, "height": 1920, "duration": 12, "fps": 30 }, "styles": [ { "name": "…", "description": "…", "time": 2.5, "code": "style-1.jsx" } ] }`.
+   Run `board-styles .motion-bridge/boards/new/styles.json`. It opens the storyboard view.
+3. End your reply with the note it prints and stop: the designer chooses now. Their choice reaches you
+   as a storyboard step through `wait` (section 3) or "check Claude Motion". If they tell you in
+   the chat instead ("the second one"), run `board-choose <board> <letter>` and go on.
+4. **Storyboard.** `board <board>` writes the chosen style's code to
+   `.motion-bridge/boards/<board>/chosen-style.jsx`. Write `storyboard.json` next to it
+   (`{ "notes": "…", "shots": [ { "title", "start", "end", "action", "text", "audio", "code": "shot-1.jsx", "time" } ] }`,
+   sketches for the key shots built from the chosen style) and run
+   `board-storyboard <board> .motion-bridge/boards/<board>/storyboard.json`. Stop again for the approval
+   (in the editor, or `board-approve <board>` / `board-revise <board> --note "…"` from the chat).
+5. **Build** after the approval: write the whole scene (every visual element its own named
+   `<Sprite>`, sound cues as `<Audio>` layers), then
+   `new <scene.jsx> --board <board> --name "<title>" --summary "<one paragraph, in the user's language>"`.
+   Helper files: `--file styles.css=<local file>` (repeatable).
+6. A validation error means the code breaks the contract: fix it and run the command again.
+7. Run `qa`: it renders the video locally and lists problems (cut-off or overlapping text, low
+   contrast, empty or frozen stretches). Fix real problems with `edit`, then end your reply with the
+   next-step note `new` printed, in the user's language (Persian text as is).
 
 ## 2. A change to the open scene asked for in the chat
 
@@ -54,9 +73,9 @@ if the editor shows "Autopilot", do not also run `wait`.
 ## 2b. "Check Claude Motion"
 
 When the user says "check Claude Motion", "check Motion Studio", «کلاد موشن رو چک کن» or
-«موشن استودیو رو چک کن», handle what the designer queued in the Ask Claude tab: run `wait` once
-(it returns at once when something is queued), answer it as in section 3, and repeat until `status`
-shows 0 queued. Do not keep listening afterwards unless asked. If the editor shows "Autopilot", the
+«موشن استودیو رو چک کن», handle what the designer queued in the Ask Claude tab or decided on a
+storyboard: run `wait` once (it returns at once when something is queued), handle it as in
+section 3, and repeat until `status` shows 0 queued. Do not keep listening afterwards unless asked. If the editor shows "Autopilot", the
 autopilot already answers requests: tell the user instead of competing with it.
 
 ## 3. Listening to the editor's Ask Claude tab
@@ -68,6 +87,9 @@ Start when the user asks you to listen, and re-arm after every request until the
 2. When it finishes, read its output. It names the request id and its `brief.md`. Read the brief,
    and the contract if you have not yet this session. The brief holds the scope, the layer tree, the
    line-numbered scene, the selected layer and the instruction.
+   `MOTION_STUDIO_BOARD_STEP` instead means a storyboard step (new video from the editor, a chosen
+   style, a requested change, an approval): its brief says which command delivers it
+   (`board-styles`, `board-storyboard` or `new … --board`). Do that, then re-arm.
 3. Write the answer to `.motion-bridge/requests/<id>/answer.jsx`:
    - scope `layer`: exactly ONE JSX element replacing the selected one, same root `data-layer-id`,
      nested ids kept, no imports, using only identifiers already in the file.

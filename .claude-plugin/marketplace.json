@@ -1,0 +1,20 @@
+{
+  "name": "wedo-claude-motion",
+  "owner": {
+    "name": "Sadidi13",
+    "url": "https://github.com/Sadidi13"
+  },
+  "metadata": {
+    "description": "WeDo Claude Motion: make videos with Claude as layer-based scenes, storyboard first, then edit them layer by layer."
+  },
+  "plugins": [
+    {
+      "name": "wedo-claude-motion",
+      "source": "./plugin",
+      "description": "Make and edit videos in WeDo Claude Motion from Claude Code in any folder: style frames, storyboard, the layered video, the quality check. Installs the app on first use if it is missing.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "homepage": "https://github.com/Sadidi13/wedo-claude-motion"
+    }
+  ]
+}

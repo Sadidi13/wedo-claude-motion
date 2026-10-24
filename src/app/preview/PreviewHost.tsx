@@ -28,6 +28,9 @@ import {
 } from "react";
 import { loadProject } from "@/lib/loader";
 import type { EditorToPreviewMessage, Project, StageMeta } from "@/lib/types";
+import { parseMotion } from "@/lib/motion/keyframes";
+import { setAudioPlayback } from "@/runtime/audio";
+import { setMotionOverride } from "@/runtime/layerMotion";
 import { clamp } from "@/runtime/easing";
 import { motionWindow } from "@/runtime/globals";
 import { toOverlayBox, type OverlayBox } from "./geometry";
@@ -182,6 +185,14 @@ export default function PreviewHost() {
         case "setTransparent":
           transparentRef.current = message.transparent;
           w?.__setTransparent?.(message.transparent);
+          break;
+        case "playback":
+          setAudioPlayback({ playing: message.playing, muted: message.muted });
+          break;
+        case "motionOverride":
+          setMotionOverride(message.id, message.motion === null ? undefined : (parseMotion(message.motion) ?? null));
+          refreshOverlay();
+          postRects();
           break;
       }
     },

@@ -30,6 +30,34 @@ First public release, under the MIT license.
 - Export: status writes retry when Windows briefly locks `status.json` during a status poll (an
   export could fail with `EPERM`).
 
+### Storyboard first
+- Every new video starts with 3 style frames to choose from, then a storyboard of shots in the
+  chosen style to approve, then the build, in the editor's Storyboard view (`docs/STORYBOARD.md`).
+  **Ask Claude → New scene** starts one from the editor; `new` refuses a scene without an approved
+  storyboard unless the user asked to skip it.
+- A style library of 117 directions with recipes, which Claude picks from and goes beyond.
+- Reference images and videos on a storyboard: ffmpeg makes a preview or a contact sheet, which
+  Claude looks at in the Code tab, the chat and the autopilot.
+
+### Editor
+- Sound layers: `<Audio>` clips from project files or 21 built-in sounds synthesized with ffmpeg
+  (effects and loopable beds), synced to the preview and mixed into MP4, WebM, MOV and the PNG zip
+  (`docs/AUDIO.md`).
+- Move, scale and rotate layers on the canvas; keyframes for X, Y, scale, rotation and opacity in
+  Properties → Transform, shown on the timeline; stored as `data-motion` (`docs/TRANSFORM.md`).
+- Frame comments (C): click a spot of the frame and tell Claude what to change there.
+- Check: a local quality check for cut-off, clipped, overlapping, low-contrast, small, left-to-right
+  Persian and too-brief text, and empty or frozen stretches; **Ask Claude to fix** (`docs/QUALITY.md`).
+- History: a version is saved when a project opens and after every change Claude makes; restore
+  any of them (`docs/VERSIONS.md`).
+- Export renders with more pages in parallel: half the logical cores, 2 to 8
+  (`MOTION_STUDIO_EXPORT_WORKERS`).
+
+### Claude Code plugin
+- `claude plugin marketplace add Sadidi13/wedo-claude-motion`, then
+  `claude plugin install wedo-claude-motion@wedo-claude-motion`: Claude Code makes videos in the app
+  from any folder, and offers to install the app when it is missing.
+
 ### Working with Claude, no API key needed
 - **Claude Code sessions** create and edit scenes with `scripts/motion-bridge.mjs` and the
   `motion-studio` skill, and can listen to the editor's Ask Claude tab.

@@ -35,7 +35,13 @@ const STATE_LABEL: Record<string, string> = {
 };
 
 export function ExportDialog({ onClose }: { onClose: () => void }) {
-  const { project, meta } = useEditorStore(useShallow((s) => ({ project: s.project, meta: s.scene?.meta ?? s.project?.meta ?? null })));
+  const { project, meta, soundLayers } = useEditorStore(
+    useShallow((s) => ({
+      project: s.project,
+      meta: s.scene?.meta ?? s.project?.meta ?? null,
+      soundLayers: s.scene ? Object.values(s.scene.byId).filter((node) => node.kind === "audio" && !node.hidden).length : 0,
+    })),
+  );
   const job = useExportJob();
 
   const [format, setFormat] = useState<ExportFormat>("mp4");
@@ -45,6 +51,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [rangeStart, setRangeStart] = useState(0);
   const [rangeEnd, setRangeEnd] = useState(meta?.duration ?? 0);
   const [quality, setQuality] = useState(17);
+  const [sound, setSound] = useState(true);
 
   if (!project || !meta) {
     return (
@@ -68,6 +75,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       range: { start: rangeStart, end: rangeEnd },
       transparent: alphaCapable && transparent,
       quality,
+      audio: sound,
     };
     void job.start({ project, options });
   };
@@ -111,6 +119,15 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           onChange={setTransparent}
           title={alphaCapable ? "Export with an alpha channel" : "Only WebM, MOV and PNG sequences keep alpha"}
         />
+        {soundLayers > 0 && (
+          <Checkbox
+            label={`Include sound (${soundLayers} audio layer${soundLayers === 1 ? "" : "s"})`}
+            checked={format !== "gif" && sound}
+            disabled={format === "gif"}
+            onChange={setSound}
+            title={format === "gif" ? "GIF has no sound" : format === "png-sequence" ? "Adds audio.wav to the zip" : "Mixes the audio layers into the video"}
+          />
+        )}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Frame rate">
             <NumberField value={fps} min={1} max={120} step={1} decimals={0} suffix="fps" onCommit={setFps} />

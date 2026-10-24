@@ -13,6 +13,8 @@ export const ATTR = {
   name: "data-layer-name",
   hidden: "data-hidden",
   locked: "data-locked",
+  /** the editor's layer motion (src/lib/motion/keyframes.ts) */
+  motion: "data-motion",
 } as const;
 
 type JSXName = t.JSXIdentifier | t.JSXMemberExpression | t.JSXNamespacedName;

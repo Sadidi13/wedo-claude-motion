@@ -1,9 +1,9 @@
 "use client";
 /**
  * Timeline transport: to start · step back · play/pause · step forward · to
- * end · loop, the "mm:ss:ff" + seconds readout and the zoom slider.
+ * end · loop · sound on/off, the "mm:ss:ff" + seconds readout and the zoom slider.
  */
-import { Pause, Play, Repeat, SkipBack, SkipForward, StepBack, StepForward, ZoomIn, ZoomOut } from "lucide-react";
+import { Pause, Play, Repeat, SkipBack, SkipForward, StepBack, StepForward, Volume2, VolumeX, ZoomIn, ZoomOut } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useEditorStore } from "@/store/editorStore";
 import { formatTimecode } from "@/store/time";
@@ -17,11 +17,12 @@ interface TransportProps {
 }
 
 export function Transport({ pxPerSecond, min, max, onZoom }: TransportProps) {
-  const { time, playing, loop, duration, fps } = useEditorStore(
+  const { time, playing, loop, muted, duration, fps } = useEditorStore(
     useShallow((s) => ({
       time: s.time,
       playing: s.playing,
       loop: s.loop,
+      muted: s.muted,
       duration: s.scene?.meta.duration ?? s.project?.meta.duration ?? 0,
       fps: s.scene?.meta.fps ?? s.project?.meta.fps ?? 30,
     })),
@@ -47,6 +48,9 @@ export function Transport({ pxPerSecond, min, max, onZoom }: TransportProps) {
       </IconButton>
       <IconButton title={loop ? "Looping: on" : "Looping: off"} active={loop} onClick={() => store.toggleLoop()}>
         <Repeat size={16} />
+      </IconButton>
+      <IconButton title={muted ? "Sound off in the preview (exports keep it)" : "Sound on"} active={muted} onClick={() => store.toggleMuted()}>
+        {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
       </IconButton>
 
       <div className="mx-2 flex items-center gap-2 rounded bg-panel-2 px-2 py-0.5 font-mono text-[12px] tabular-nums">

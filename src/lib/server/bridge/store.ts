@@ -12,6 +12,7 @@
  *   editor.json         { lastSeen } — heartbeat of the open editor tab (its event polls)
  *   requests/<id>.json  one Ask Claude request from the editor and its outcome
  *   events/<id>.json    scenes / edits Claude pushed from the desktop chat
+ *   boards/<id>.json    storyboards (style frames → storyboard → build), see boards.ts
  *
  * Ids are time-ordered ([0-9a-z], lexicographic order = creation order), so
  * "next pending request" and "events after cursor" are a sorted directory
@@ -25,6 +26,7 @@ import { customAlphabet } from "nanoid";
 import type {
   AiEditRequest,
   AiEditResponse,
+  BoardAction,
   BridgeClient,
   BridgeEvent,
   BridgeRequestState,
@@ -52,6 +54,14 @@ export const MAX_PENDING_REQUESTS = 20;
 export const BRIDGE_ID_PATTERN = /^[0-9a-z]{15}$/;
 export const TOKEN_HEADER = "x-motion-bridge-token";
 
+/** A storyboard step the editor queued for Claude (the request's `request` then only carries the stage meta). */
+export interface BoardRequestInfo {
+  boardId: string;
+  action: BoardAction;
+  /** the designer's note for this step */
+  note?: string;
+}
+
 export interface BridgeRequestRecord {
   id: string;
   state: BridgeRequestState;
@@ -59,6 +69,8 @@ export interface BridgeRequestRecord {
   claimedAt?: string;
   finishedAt?: string;
   request: AiEditRequest;
+  /** set for storyboard steps; they are finished by the board update Claude sends, not by an answer */
+  board?: BoardRequestInfo;
   result?: AiEditResponse;
   error?: string;
 }
@@ -94,7 +106,7 @@ function requestFile(id: string): string {
   return path.join(requestsDir(), `${id}.json`);
 }
 
-async function readJson<T>(file: string): Promise<T | null> {
+export async function readJson<T>(file: string): Promise<T | null> {
   try {
     return JSON.parse(await readFile(file, "utf8")) as T;
   } catch (error) {
@@ -105,7 +117,7 @@ async function readJson<T>(file: string): Promise<T | null> {
 
 const RETRYABLE_RENAME = new Set(["EPERM", "EBUSY", "EACCES"]);
 
-async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
+export async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${randomSuffix()}.tmp`;
   await writeFile(tmp, JSON.stringify(value), "utf8");
@@ -125,7 +137,7 @@ async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
   }
 }
 
-async function listIds(dir: string): Promise<string[]> {
+export async function listIds(dir: string): Promise<string[]> {
   try {
     return (await readdir(dir))
       .filter((name) => name.endsWith(".json"))
@@ -224,7 +236,7 @@ async function pruneRequests(now: number): Promise<number> {
   return pending;
 }
 
-export function createRequest(request: AiEditRequest, now = new Date()): Promise<BridgeRequestRecord> {
+export function createRequest(request: AiEditRequest, now = new Date(), board?: BoardRequestInfo): Promise<BridgeRequestRecord> {
   return serial(async () => {
     const pending = await pruneRequests(now.getTime());
     if (pending >= MAX_PENDING_REQUESTS) {
@@ -235,6 +247,7 @@ export function createRequest(request: AiEditRequest, now = new Date()): Promise
       state: "pending",
       createdAt: now.toISOString(),
       request,
+      ...(board ? { board } : {}),
     };
     await writeJsonAtomic(requestFile(record.id), record);
     return record;
@@ -275,7 +288,8 @@ export class BridgeStateError extends Error {
   }
 }
 
-export type RequestOutcome = { result: AiEditResponse } | { error: string } | { cancelled: true };
+/** `handled`: a storyboard step Claude completed with a board update (there is no edit to apply). */
+export type RequestOutcome = { result: AiEditResponse } | { error: string } | { cancelled: true } | { handled: true };
 
 /**
  * Finish a request. Only pending / claimed requests can be finished; a
@@ -293,6 +307,7 @@ export function finishRequest(id: string, outcome: RequestOutcome, now = new Dat
     let next: BridgeRequestRecord;
     if ("result" in outcome) next = { ...record, state: "done", result: outcome.result, finishedAt };
     else if ("error" in outcome) next = { ...record, state: "error", error: outcome.error, finishedAt };
+    else if ("handled" in outcome) next = { ...record, state: "done", finishedAt };
     else next = { ...record, state: "cancelled", finishedAt };
     await writeJsonAtomic(requestFile(id), next);
     return next;
@@ -343,7 +358,8 @@ export async function bridgeStatus(now = Date.now()): Promise<BridgeStatus> {
 /** An event before the store assigns its id and timestamp. */
 export type NewBridgeEvent =
   | Omit<Extract<BridgeEvent, { type: "project" }>, "id" | "at">
-  | Omit<Extract<BridgeEvent, { type: "edit" }>, "id" | "at">;
+  | Omit<Extract<BridgeEvent, { type: "edit" }>, "id" | "at">
+  | Omit<Extract<BridgeEvent, { type: "board" }>, "id" | "at">;
 
 export async function pushEvent(event: NewBridgeEvent, now = new Date()): Promise<BridgeEvent> {
   const full = { ...event, id: newBridgeId(now.getTime()), at: now.toISOString() } as BridgeEvent;

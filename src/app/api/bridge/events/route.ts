@@ -45,7 +45,7 @@ export async function POST(request: Request): Promise<Response> {
       ok: true,
       eventId: event.id,
       type: event.type,
-      projectId: event.type === "project" ? event.project.id : event.projectId,
+      projectId: event.type === "project" ? event.project.id : event.type === "edit" ? event.projectId : null,
       layers: result.layers,
     },
     { status: 201 },

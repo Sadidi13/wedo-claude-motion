@@ -1,21 +1,23 @@
 "use client";
 /**
  * Properties tab: the selected layer's name, kind, timing (seconds + frames),
- * hidden / locked flags and quick actions; with nothing selected, the Stage
- * props (size, duration, fps, background) edited through setStageMeta, plus
- * the parser's warnings.
+ * sound settings for <Audio> clips, hidden / locked flags and quick actions;
+ * with nothing selected, the Stage props (size, duration, fps, background)
+ * edited through setStageMeta, plus the parser's warnings.
  */
 import { Braces, Clapperboard, Copy, Trash2 } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { SFX } from "@/lib/audio/sfx";
 import type { LayerNode, StageMeta } from "@/lib/types";
 import { useEditorStore } from "@/store/editorStore";
-import { dragBoundsFor, hasLiteralTiming } from "@/store/layerRows";
+import { dragBoundsFor, hasLiteralTiming, isTimed } from "@/store/layerRows";
 import { formatRange, toFrame } from "@/store/time";
 import { Button } from "./ui/Button";
 import { Checkbox } from "./ui/Checkbox";
 import { Field } from "./ui/Field";
 import { NumberField } from "./ui/NumberField";
+import { TransformSection } from "./TransformSection";
 
 /** Stable empty list so the store selector returns a referentially equal snapshot while no scene is parsed. */
 const EMPTY_WARNINGS: string[] = [];
@@ -88,7 +90,7 @@ function LayerProperties({ node, meta, onOpenCode }: { node: LayerNode; meta: St
       </Section>
 
       <Section title="Timing">
-        {node.kind === "sprite" && literal && (
+        {isTimed(node) && literal && (
           <>
             <div className="grid grid-cols-2 gap-2">
               <Field label="Start">
@@ -119,12 +121,12 @@ function LayerProperties({ node, meta, onOpenCode }: { node: LayerNode; meta: St
             </p>
           </>
         )}
-        {node.kind === "sprite" && !literal && (
+        {isTimed(node) && !literal && (
           <p className="text-[11.5px] text-accent-2">
-            This Sprite&apos;s timing is an expression and cannot be edited numerically. Change it in the Code tab.
+            This layer&apos;s timing is an expression and cannot be edited numerically. Change it in the Code tab.
           </p>
         )}
-        {node.kind !== "sprite" && (
+        {!isTimed(node) && (
           <>
             <p className="text-[11.5px] text-muted">Inherits {formatRange(node.range)} from its parent. Wrap it in a Sprite to retime it on its own.</p>
             <Button
@@ -138,6 +140,9 @@ function LayerProperties({ node, meta, onOpenCode }: { node: LayerNode; meta: St
           </>
         )}
       </Section>
+
+      {node.kind === "audio" && node.audio && <AudioSection node={node} audio={node.audio} />}
+      {node.kind !== "audio" && <TransformSection node={node} />}
 
       <Section title="Visibility">
         <Checkbox label="Hidden (H)" checked={node.hidden} onChange={(hidden) => store.setHidden(node.id, hidden)} />
@@ -158,6 +163,76 @@ function LayerProperties({ node, meta, onOpenCode }: { node: LayerNode; meta: St
         </div>
       </Section>
     </>
+  );
+}
+
+function AudioSection({ node, audio }: { node: LayerNode; audio: NonNullable<LayerNode["audio"]> }) {
+  const store = useEditorStore.getState();
+  const source = audio.sfx ? `Sound effect: ${SFX[audio.sfx]?.label ?? audio.sfx}` : audio.src ? `File: ${audio.src.startsWith("data:") ? "embedded" : audio.src}` : "No source";
+  const volume = audio.volume ?? 1;
+  return (
+    <Section title="Sound">
+      <p className="truncate text-[11.5px] text-muted" title={source}>
+        {source}
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Volume">
+          <NumberField
+            value={Math.round(volume * 100)}
+            min={0}
+            max={100}
+            step={5}
+            suffix="%"
+            decimals={0}
+            label="Volume"
+            disabled={node.locked}
+            onCommit={(value) => store.setAttribute(node.id, "volume", value >= 100 ? null : Math.round(value) / 100)}
+          />
+        </Field>
+        <Field label="Start in file">
+          <NumberField
+            value={audio.from ?? 0}
+            min={0}
+            max={3600}
+            step={0.1}
+            suffix="s"
+            label="Start in file"
+            disabled={node.locked}
+            onCommit={(value) => store.setAttribute(node.id, "from", value > 0 ? value : null)}
+          />
+        </Field>
+        <Field label="Fade in">
+          <NumberField
+            value={audio.fadeIn ?? 0}
+            min={0}
+            max={60}
+            step={0.1}
+            suffix="s"
+            label="Fade in"
+            disabled={node.locked}
+            onCommit={(value) => store.setAttribute(node.id, "fadeIn", value > 0 ? value : null)}
+          />
+        </Field>
+        <Field label="Fade out">
+          <NumberField
+            value={audio.fadeOut ?? 0}
+            min={0}
+            max={60}
+            step={0.1}
+            suffix="s"
+            label="Fade out"
+            disabled={node.locked}
+            onCommit={(value) => store.setAttribute(node.id, "fadeOut", value > 0 ? value : null)}
+          />
+        </Field>
+      </div>
+      <Checkbox
+        label="Loop until the clip's end"
+        checked={audio.loop}
+        disabled={node.locked}
+        onChange={(loop) => store.setAttribute(node.id, "loop", loop)}
+      />
+    </Section>
   );
 }
 

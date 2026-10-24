@@ -4,6 +4,7 @@ import type { ProjectFile } from "@/lib/types";
 import {
   CHROMIUM_LAUNCH_ARGS,
   DEFAULT_WORKERS,
+  defaultWorkers,
   chromiumLaunchArgs,
   chromiumSandboxEnabled,
   isAllowedRenderRequest,
@@ -45,8 +46,13 @@ describe("resolveChromiumPath", () => {
     expect(resolved === undefined || existsSync(resolved)).toBe(true);
   });
 
-  it("defaults to three parallel contexts", () => {
-    expect(DEFAULT_WORKERS).toBe(3);
+  it("renders with half the cores in parallel, between 2 and 8 pages", () => {
+    expect(defaultWorkers({}, 0)).toBe(DEFAULT_WORKERS);
+    expect(defaultWorkers({}, 2)).toBe(2);
+    expect(defaultWorkers({}, 12)).toBe(6);
+    expect(defaultWorkers({}, 64)).toBe(8);
+    expect(defaultWorkers({ MOTION_STUDIO_EXPORT_WORKERS: "4" }, 64)).toBe(4);
+    expect(defaultWorkers({ MOTION_STUDIO_EXPORT_WORKERS: "zero" }, 12)).toBe(6);
   });
 });
 

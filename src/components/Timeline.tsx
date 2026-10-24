@@ -167,7 +167,7 @@ export function Timeline() {
                   onClick={() => useEditorStore.getState().select(node.id)}
                   title={`${node.name} <${node.tag}>`}
                 >
-                  <span className={cx("h-2 w-2 shrink-0 rounded-sm", node.kind === "sprite" ? "bg-accent" : "bg-border-strong")} />
+                  <span className={cx("h-2 w-2 shrink-0 rounded-sm", node.kind === "sprite" ? "bg-accent" : node.kind === "audio" ? "bg-success" : "bg-border-strong")} />
                   <span className="truncate">{node.name}</span>
                 </div>
                 <div className="relative border-b border-border/60" style={{ width: trackWidth, background: trackBackground }}>

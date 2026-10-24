@@ -48,6 +48,7 @@ import React, {
 import { flushSync } from "react-dom";
 import type { StageMeta } from "@/lib/types";
 import { getClock, setClock, useClock, type ClockState } from "./clock";
+import { applyLayerMotion } from "./layerMotion";
 import { Easing, animate, clamp, interpolate, lerp } from "./easing";
 import { motionWindow } from "./globals";
 import { registerStage, unregisterStage, type StageHandle } from "./registry";
@@ -253,6 +254,12 @@ export function Stage({
     };
   }, []);
 
+  // The editor's layer motion (data-motion: drag / scale / rotate / keyframes) on top of the scene's
+  // own styles, after every commit of the Stage (time changes always re-render it).
+  useLayoutEffect(() => {
+    if (stageRef.current) applyLayerMotion(stageRef.current, time);
+  });
+
   // Standalone autoplay. Embed / render mode never play: time only moves through __seek.
   useEffect(() => {
     setClock({ playing: mode === "standalone" && autoplay });
@@ -355,7 +362,7 @@ export function Sprite({ start = 0, end = Infinity, keepMounted = false, childre
 
   return (
     <SpriteContext.Provider value={state}>
-      <div data-sprite="" {...rest} style={wrapperStyle}>
+      <div data-sprite="" data-sprite-start={Number.isFinite(start) ? start : 0} {...rest} style={wrapperStyle}>
         {typeof children === "function" ? children(state) : children}
       </div>
     </SpriteContext.Provider>

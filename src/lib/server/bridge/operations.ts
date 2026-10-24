@@ -7,7 +7,9 @@
  * - `completeRequest`: Claude's `{ summary, code, files? }` for a claimed
  *   request, validated with `finalizeOutput` exactly like an API answer.
  * - `pushNewScene` / `pushEdit`: scenes and edits written in the desktop chat,
- *   validated the same way and queued as events for the open editor.
+ *   validated the same way and queued as events for the open editor. A new
+ *   scene needs an approved storyboard board (boards.ts) unless the user
+ *   explicitly skipped it.
  */
 
 import { z } from "zod";
@@ -25,6 +27,7 @@ import type {
   Project,
   ProjectFile,
 } from "@/lib/types";
+import { boardForBuild, markBoardBuilt, recordBoardDecline } from "./boards";
 import { BridgeStateError, type BridgeRequestRecord, finishRequest, pushEvent, readSyncedProject } from "./store";
 
 /** Body of POST /api/bridge/requests/[id]/result. */
@@ -35,6 +38,10 @@ export const BridgePushSchema = z.discriminatedUnion("type", [
   AiOutputSchema.extend({
     type: z.literal("project"),
     name: z.string().trim().min(1).max(120),
+    /** the approved storyboard this video is built from */
+    boardId: z.string().min(1).optional(),
+    /** only when the user explicitly asked for no storyboard */
+    skipStoryboard: z.boolean().optional(),
   }),
   AiOutputSchema.extend({
     type: z.literal("edit"),
@@ -141,6 +148,19 @@ export async function completeRequest(
   record: BridgeRequestRecord,
   body: z.infer<typeof BridgeResultSchema>,
 ): Promise<AiEditResponse | AiErrorResponse> {
+  if (record.board) {
+    // Storyboard steps are answered with board updates; only declining goes through here.
+    if (!("error" in body)) {
+      return {
+        ok: false,
+        code: "bad_request",
+        error: "This request is a storyboard step: answer it with the board command or tool its brief names (styles, storyboard or the scene with the board id).",
+      };
+    }
+    await finishRequest(record.id, { error: body.error });
+    await recordBoardDecline(record.board.boardId, body.error);
+    return { ok: false, code: "declined", error: body.error };
+  }
   if ("error" in body) {
     await finishRequest(record.id, { error: body.error });
     return { ok: false, code: "declined", error: body.error };
@@ -167,13 +187,30 @@ export type PushResult =
   | { ok: true; event: BridgeEvent; layers: number }
   | { ok: false; status: number; error: string };
 
+export const STORYBOARD_REQUIRED =
+  "New videos start with a storyboard (authoring guide, section 9): propose style frames first (board-styles in a Code session, " +
+  "propose_styles in the chat), let the designer pick a style and approve the storyboard, then build with the board id. " +
+  "Skip it (skipStoryboard / --skip-storyboard / skip_storyboard) only when the user explicitly asked for no storyboard.";
+
 /** A complete new scene written in the desktop chat: validated, then queued for the editor. */
 export async function pushNewScene(push: Extract<BridgePush, { type: "project" }>): Promise<PushResult> {
+  let boardId: string | null = null;
+  if (push.boardId) {
+    try {
+      boardId = (await boardForBuild(push.boardId)).id;
+    } catch (error) {
+      if (error instanceof BridgeStateError) return { ok: false, status: error.status, error: error.message };
+      throw error;
+    }
+  } else if (!push.skipStoryboard) {
+    return { ok: false, status: 409, error: STORYBOARD_REQUIRED };
+  }
   const request: AiEditRequest = { scope: "new", prompt: push.name, project: createBlankProject(undefined, push.name) };
   const result = finalizeOutput(request, push);
   if (!result.ok) return { ok: false, status: 422, error: result.error };
   const project = projectFromScene(push.name, result);
-  const event = await pushEvent({ type: "project", project, summary: result.summary });
+  const event = await pushEvent({ type: "project", project, summary: result.summary, ...(boardId ? { boardId } : {}) });
+  if (boardId) await markBoardBuilt(boardId, project.id);
   return { ok: true, event, layers: parseScene(result.sceneCode ?? "").layers.length };
 }
 

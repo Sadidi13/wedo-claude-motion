@@ -37,9 +37,27 @@ export function sourceDirectionFor(panelDirection: "up" | "down"): "up" | "down"
   return panelDirection === "up" ? "down" : "up";
 }
 
-/** True for a `<Sprite>` whose start AND end are numeric literals (editable from the timeline). */
+/** True for a `<Sprite>` / `<Audio>` whose start AND end are numeric literals (editable from the timeline). */
 export function hasLiteralTiming(node: LayerNode): boolean {
-  return node.kind === "sprite" && node.start !== undefined && node.end !== undefined;
+  return isTimed(node) && node.start !== undefined && node.end !== undefined;
+}
+
+/** Layers with their own timing: Sprites and Audio clips. */
+export function isTimed(node: LayerNode): boolean {
+  return node.kind === "sprite" || node.kind === "audio";
+}
+
+/**
+ * Start (stage seconds) of the Sprite whose clock a layer's keyframes use: the layer itself when it
+ * is a Sprite, else its nearest Sprite ancestor; 0 outside any Sprite.
+ */
+export function motionClockStart(byId: Readonly<Record<string, LayerNode>>, node: LayerNode): number {
+  let current: LayerNode | undefined = node;
+  while (current) {
+    if (current.kind === "sprite") return current.start !== undefined && Number.isFinite(current.start) ? current.start : current.range.start;
+    current = current.parentId ? byId[current.parentId] : undefined;
+  }
+  return 0;
 }
 
 /** Every ancestor id of `id`, nearest first. */

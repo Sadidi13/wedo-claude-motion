@@ -11,21 +11,24 @@
  * extra Chromium switches of `webglLaunchArgs`. Frames are split into
  * contiguous ranges, one BrowserContext + page per worker. status.json is
  * updated every 10 frames and on completion; the browser is always closed in
- * `finally`.
+ * `finally`. Each worker also reports the <Audio> clips its frames rendered
+ * (`window.__getAudioClips`), merged into `RenderResult.audio` for the mix.
  *
  * Tests pass `pageUrl` to render any page that implements the same globals.
  */
 
 import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { chromium, type Browser } from "playwright-core";
 import type { Project } from "@/lib/types";
+import { type AudioClip, mergeClips } from "./audio";
 import { jobDir, readOptions, readProject, writeStatus } from "./jobs";
 import { frameFileName, frameTime, partitionFrames, resolvePlan, type FrameRange, type RenderPlan } from "./plan";
 
 export interface RenderOptions {
-  /** parallel browser contexts (default 3, capped at the frame count) */
+  /** parallel browser contexts (default: defaultWorkers(), capped at the frame count) */
   workers?: number;
   /** full page URL to render instead of `${origin}/preview?job=…` (tests) */
   pageUrl?: string;
@@ -34,6 +37,8 @@ export interface RenderOptions {
 export interface RenderResult {
   plan: RenderPlan;
   framesDir: string;
+  /** the <Audio> clips the scene rendered (empty when it has none) */
+  audio: AudioClip[];
 }
 
 /** Minimal view of the globals the runtime installs (see src/runtime/globals.ts). */
@@ -44,7 +49,20 @@ interface PreviewGlobals {
   __whenIdle?: () => Promise<void>;
 }
 
+/** Parallel pages when the machine's core count is unknown. */
 export const DEFAULT_WORKERS = 3;
+const MAX_WORKERS = 8;
+
+/**
+ * Pages rendering in parallel: half the logical cores (each page has its own renderer and GPU
+ * work), between 2 and 8; MOTION_STUDIO_EXPORT_WORKERS overrides it.
+ */
+export function defaultWorkers(env: Record<string, string | undefined> = process.env, cores = os.availableParallelism?.() ?? 0): number {
+  const forced = Number(env.MOTION_STUDIO_EXPORT_WORKERS);
+  if (Number.isInteger(forced) && forced >= 1) return Math.min(forced, 16);
+  if (!cores) return DEFAULT_WORKERS;
+  return Math.min(MAX_WORKERS, Math.max(2, Math.floor(cores / 2)));
+}
 const FALLBACK_CHROMIUM = "/opt/pw-browsers/chromium";
 const READY_TIMEOUT_MS = 60_000;
 const NAVIGATION_TIMEOUT_MS = 90_000;
@@ -200,7 +218,7 @@ async function renderRange(
   framesDir: string,
   range: FrameRange,
   onFrame: () => Promise<void>,
-): Promise<void> {
+): Promise<unknown> {
   const context = await browser.newContext({
     viewport: { width: plan.width, height: plan.height },
     deviceScaleFactor: plan.scale,
@@ -257,6 +275,10 @@ async function renderRange(
       await page.screenshot({ ...shot, clip, path: path.join(framesDir, frameFileName(index, plan.frameExt)) });
       await onFrame();
     }
+    return await page.evaluate(() => {
+      const w = window as unknown as { __getAudioClips?: () => unknown };
+      return typeof w.__getAudioClips === "function" ? w.__getAudioClips() : [];
+    });
   } finally {
     await context.close();
   }
@@ -276,7 +298,7 @@ export async function renderJob(jobId: string, origin: string, opts: RenderOptio
   await mkdir(framesDir, { recursive: true });
 
   const url = opts.pageUrl ?? previewUrl(origin, jobId, plan.transparent);
-  const ranges = partitionFrames(plan.frameCount, opts.workers ?? DEFAULT_WORKERS);
+  const ranges = partitionFrames(plan.frameCount, opts.workers ?? defaultWorkers());
   await writeStatus(jobId, { state: "rendering", framesDone: 0, framesTotal: plan.frameCount, progress: 0 });
   const onFrame = createProgress(jobId, plan.frameCount);
 
@@ -285,10 +307,11 @@ export async function renderJob(jobId: string, origin: string, opts: RenderOptio
     args: chromiumLaunchArgs(projectUsesWebGL(project)),
     chromiumSandbox: chromiumSandboxEnabled(),
   });
+  let reported: unknown[];
   try {
-    await Promise.all(ranges.map((range) => renderRange(browser, jobId, url, plan, framesDir, range, onFrame)));
+    reported = await Promise.all(ranges.map((range) => renderRange(browser, jobId, url, plan, framesDir, range, onFrame)));
   } finally {
     await browser.close();
   }
-  return { plan, framesDir };
+  return { plan, framesDir, audio: mergeClips(reported) };
 }

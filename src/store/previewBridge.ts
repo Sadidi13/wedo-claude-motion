@@ -21,7 +21,8 @@ function isLayerRect(value: unknown): value is LayerRect {
     isNumber(value.x) &&
     isNumber(value.y) &&
     isNumber(value.width) &&
-    isNumber(value.height)
+    isNumber(value.height) &&
+    (value.visible === undefined || typeof value.visible === "boolean")
   );
 }
 
@@ -56,6 +57,9 @@ export interface PreviewBridge {
   getLayerRects(): void;
   highlight(id: string | null): void;
   setTransparent(transparent: boolean): void;
+  playback(playing: boolean, muted: boolean): void;
+  /** live data-motion JSON for a layer while dragging; null returns to the code's own */
+  motionOverride(id: string, motion: string | null): void;
 }
 
 /**
@@ -76,6 +80,8 @@ export function createPreviewBridge(getTarget: () => Window | null | undefined, 
     getLayerRects: () => post({ type: "getLayerRects" }),
     highlight: (id) => post({ type: "highlight", id }),
     setTransparent: (transparent) => post({ type: "setTransparent", transparent }),
+    playback: (playing, muted) => post({ type: "playback", playing, muted }),
+    motionOverride: (id, motion) => post({ type: "motionOverride", id, motion }),
   };
 }
 

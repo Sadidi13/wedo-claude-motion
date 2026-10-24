@@ -23,12 +23,31 @@ export {
   syncProject,
   toView,
   touchEditor,
+  type BoardRequestInfo,
   type BridgeRequestRecord,
   type SyncedProject,
 } from "./store";
 export {
+  BoardActionSchema,
+  BoardReferencesSchema,
+  BoardStartSchema,
+  BoardStoryboardSchema,
+  BoardStylesSchema,
+  BoardValidationError,
+  addBoardReferences,
+  boardAction,
+  listBoards,
+  proposeStoryboard,
+  proposeStyles,
+  readBoard,
+  startBoard,
+} from "./boards";
+export { buildBoardBrief, deliverableFor, type BoardDeliverable } from "./boardBrief";
+export { readReferenceFile, referenceFile, referencesDir } from "./references";
+export {
   BridgePushSchema,
   BridgeResultSchema,
+  STORYBOARD_REQUIRED,
   buildBrief,
   completeRequest,
   pushEdit,
