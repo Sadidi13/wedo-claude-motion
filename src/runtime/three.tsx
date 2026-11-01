@@ -10,20 +10,27 @@
  *             so a headless screenshot always sees the last drawn frame), an
  *             empty Scene and a PerspectiveCamera sized to the layer;
  *   wait      web fonts (`document.fonts.ready`: text drawn into a texture in
- *             setup is baked once) and the optional `textures` images
- *             (`{ name: url }`, project assets become data URLs) are ready
- *             before anything is drawn; the frame is held (pending.ts) so the
- *             exporter waits too;
+ *             setup is baked once), the optional `textures` images and the
+ *             optional `models` glTF files (`{ name: url }`, project assets
+ *             become data URLs) are ready before anything is drawn; the frame
+ *             is held (pending.ts) so the exporter waits too;
  *   setup     runs once per mount with { THREE, scene, camera, renderer,
- *             width, height, textures }: build meshes, lights, materials.
- *             Whatever it returns comes back to `render` as `frame.state`;
+ *             width, height, textures, models }: build meshes, lights,
+ *             materials (with `environment`, studio reflections are already
+ *             on `scene.environment`). Whatever it returns comes back to
+ *             `render` as `frame.state`;
  *   commit    every render of the component (each time change) calls
- *             `render(t, frame)` and then `renderer.render(scene, camera)`
- *             (skip with autoRender={false}). It runs in a layout effect, so
- *             under `window.__seek` (flushSync) the canvas is drawn before the
- *             call returns;
- *   unmount   geometries, materials, textures and the renderer are disposed
- *             and the WebGL context is released (browsers allow only ~16).
+ *             `render(t, frame)` and then draws the scene, through a bloom
+ *             pass when `bloom` is set (skip with autoRender={false}). It runs
+ *             in a layout effect, so under `window.__seek` (flushSync) the
+ *             canvas is drawn before the call returns;
+ *   unmount   geometries, materials, textures, models, the bloom passes and
+ *             the renderer are disposed and the WebGL context is released
+ *             (browsers allow only ~16).
+ *
+ * Scenes may only import the main `three` module; the glTF loader,
+ * RoomEnvironment and the bloom passes come from `three/addons` here, inside
+ * the runtime.
  *
  * The wrapper <div> carries the `data-*` props, so the canvas is one layer for
  * selection and `__getLayerRects`. Errors (WebGL missing, lost context, a
@@ -33,9 +40,25 @@
 import React, { useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes } from "react";
 import { flushSync } from "react-dom";
 import * as THREE from "three";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { fontsLoaded } from "./fonts";
 import { useSprite, useStage, useTime } from "./motion";
 import { holdFrame } from "./pending";
+
+/** One parsed glTF / GLB file from the `models` prop. */
+export interface Three3DModel {
+  /** the file's default scene: add it (or its children) to your scene */
+  scene: THREE.Group;
+  /** animation clips; play one with an AnimationMixer and `mixer.setTime(t)` */
+  animations: THREE.AnimationClip[];
+  cameras: THREE.Camera[];
+}
 
 export interface Three3DContext {
   /** the three.js module (same instance as `import * as THREE from "three"`) */
@@ -48,6 +71,8 @@ export interface Three3DContext {
   height: number;
   /** the decoded `textures` prop (same keys) */
   textures: Record<string, THREE.Texture>;
+  /** the parsed `models` prop (same keys) */
+  models: Record<string, Three3DModel>;
 }
 
 export interface Three3DFrame<S = unknown> extends Three3DContext {
@@ -66,6 +91,21 @@ export interface Three3DCameraOptions {
   far?: number;
 }
 
+/**
+ * UnrealBloomPass settings: glow around pixels brighter than `threshold`. The
+ * scene is measured before tone mapping, so with the default threshold of 1
+ * only over-bright colour glows (e.g. `color.multiplyScalar(4)` with
+ * `toneMapped: false`, or a strong emissive), not ordinary lit surfaces.
+ */
+export interface Three3DBloomOptions {
+  /** default 0.8 */
+  strength?: number;
+  /** spread, 0 to 1; default 0.4 */
+  radius?: number;
+  /** linear luminance above which pixels glow; default 1 */
+  threshold?: number;
+}
+
 export interface Three3DProps<S = unknown> extends Omit<HTMLAttributes<HTMLDivElement>, "children"> {
   /** build the scene once per mount; the return value is passed back as `frame.state` */
   setup?: (ctx: Three3DContext) => S;
@@ -78,6 +118,15 @@ export interface Three3DProps<S = unknown> extends Omit<HTMLAttributes<HTMLDivEl
   camera?: Three3DCameraOptions;
   /** images to decode before the first frame: `{ logo: "assets/logo.png" }` */
   textures?: Record<string, string>;
+  /** glTF files (.glb, or .gltf with embedded data) to parse before the first frame: `{ product: "assets/product.glb" }` */
+  models?: Record<string, string>;
+  /** glow on bright pixels (`true` for the defaults); drawn by the automatic render only */
+  bloom?: boolean | Three3DBloomOptions;
+  /**
+   * studio reflections (`scene.environment`, set before `setup`): `true`, or its intensity.
+   * Metallic and glossy glTF materials look dark and flat without one.
+   */
+  environment?: boolean | number;
   antialias?: boolean;
   /** false: `render` draws itself (e.g. several passes); default true */
   autoRender?: boolean;
@@ -101,16 +150,57 @@ function disposeMaterial(material: THREE.Material): void {
   material.dispose();
 }
 
-/** Free the GPU resources of everything reachable from the scene. */
-function disposeScene(scene: THREE.Scene): void {
-  scene.traverse((object) => {
+/** Free the geometries, materials and material textures under `root`. */
+function disposeTree(root: THREE.Object3D): void {
+  root.traverse((object) => {
     const { geometry, material } = object as Partial<THREE.Mesh>;
     geometry?.dispose();
     if (Array.isArray(material)) material.forEach(disposeMaterial);
     else if (material) disposeMaterial(material);
   });
+}
+
+/** Free the GPU resources of everything reachable from the scene. */
+function disposeScene(scene: THREE.Scene): void {
+  disposeTree(scene);
   if (scene.background instanceof THREE.Texture) scene.background.dispose();
   scene.environment?.dispose();
+}
+
+/**
+ * Fetches (a data: URL in projects, so no network) and parses one glTF file. Meshopt
+ * compression and quantised attributes decode here; Draco and KTX2 need decoder files the
+ * export renderer is not allowed to fetch, so they fail with a hint instead.
+ */
+async function loadModel(name: string, url: string): Promise<Three3DModel> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+    const gltf = await loader.parseAsync(await response.arrayBuffer(), "");
+    return { scene: gltf.scene, animations: gltf.animations, cameras: gltf.cameras };
+  } catch (error) {
+    const hint = /draco|ktx2|basisu/i.test(describe(error))
+      ? " Draco and KTX2 compression are not supported: re-export with meshopt (gltf-transform optimize --compress meshopt --texture-compress webp)."
+      : "";
+    throw new Error(`Three3D could not load model "${name}" (${describe(error)}).${hint}`, { cause: error });
+  }
+}
+
+/** A blurred studio room (three's RoomEnvironment) as the scene's reflection map. */
+function addStudioEnvironment(renderer: THREE.WebGLRenderer, scene: THREE.Scene, intensity: number): void {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const room = new RoomEnvironment();
+  scene.environment = pmrem.fromScene(room, 0.04).texture;
+  scene.environmentIntensity = intensity;
+  room.dispose();
+  pmrem.dispose();
+}
+
+function bloomSettings(bloom: Three3DProps["bloom"]): Required<Three3DBloomOptions> | null {
+  if (!bloom) return null;
+  const options = bloom === true ? {} : bloom;
+  return { strength: options.strength ?? 0.8, radius: options.radius ?? 0.4, threshold: options.threshold ?? 1 };
 }
 
 function loadTexture(name: string, url: string): Promise<THREE.Texture> {
@@ -131,6 +221,11 @@ function loadTexture(name: string, url: string): Promise<THREE.Texture> {
   );
 }
 
+interface Bloom {
+  composer: EffectComposer;
+  pass: UnrealBloomPass;
+}
+
 interface Engine {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
@@ -141,17 +236,39 @@ interface Engine {
   pixelRatio: number;
   setupDone: boolean;
   state: unknown;
+  /** created on the first frame that asks for bloom, dropped when it is turned off */
+  bloom: Bloom | null;
+}
+
+/** What setup waits for: fonts, plus the decoded `textures` and parsed `models`. */
+interface Loaded {
+  textures: Record<string, THREE.Texture>;
+  models: Record<string, Three3DModel>;
+}
+
+/** A short stand-in for a (possibly multi-megabyte) data URL in the remount key. */
+function urlKey(url: string): string {
+  return url.length > 256 ? `${url.length}:${url.slice(0, 96)}…${url.slice(-96)}` : url;
+}
+
+function assetsKey(urls: Record<string, string> | undefined): string {
+  return Object.entries(urls ?? {})
+    .map(([name, url]) => `${name}=${urlKey(url)}`)
+    .join("|");
+}
+
+function disposeBloom(bloom: Bloom): void {
+  bloom.pass.dispose();
+  bloom.composer.dispose();
 }
 
 /**
- * Remounts the canvas when `textures` or `antialias` change, so `setup` always
- * runs exactly once against a fresh scene.
+ * Remounts the canvas when `textures`, `models`, `environment` or `antialias`
+ * change, so `setup` always runs exactly once against a fresh scene.
  */
 export function Three3D<S = unknown>(props: Three3DProps<S>) {
-  const textureKey = Object.entries(props.textures ?? {})
-    .map(([name, url]) => `${name}=${url}`)
-    .join("|");
-  return <Three3DCanvas<S> key={`${props.antialias !== false}|${textureKey}`} {...props} />;
+  const key = `${props.antialias !== false}|${String(props.environment ?? false)}|${assetsKey(props.textures)}|${assetsKey(props.models)}`;
+  return <Three3DCanvas<S> key={key} {...props} />;
 }
 
 function Three3DCanvas<S>({
@@ -161,6 +278,9 @@ function Three3DCanvas<S>({
   height: heightProp,
   camera: cameraOptions,
   textures: textureUrls,
+  models: modelUrls,
+  bloom,
+  environment,
   antialias = true,
   autoRender = true,
   style,
@@ -175,9 +295,12 @@ function Three3DCanvas<S>({
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const [failure, setFailure] = useState<Error | null>(null);
-  // null until setup may run: fonts loaded (text drawn into a texture is baked once) and textures decoded.
-  const [textures, setTextures] = useState<Record<string, THREE.Texture> | null>(() =>
-    Object.keys(textureUrls ?? {}).length || !fontsLoaded() ? null : {},
+  // null until setup may run: fonts loaded (text drawn into a texture is baked once), textures
+  // decoded and models parsed.
+  const [loaded, setLoaded] = useState<Loaded | null>(() =>
+    Object.keys(textureUrls ?? {}).length || Object.keys(modelUrls ?? {}).length || !fontsLoaded()
+      ? null
+      : { textures: {}, models: {} },
   );
 
   // Mount: canvas + renderer + scene + camera. The canvas is created here (not in JSX) so a
@@ -209,7 +332,8 @@ function Three3DCanvas<S>({
       cameraOptions?.near ?? 0.1,
       cameraOptions?.far ?? 1000,
     );
-    engineRef.current = { renderer, scene, camera, width: 0, height: 0, pixelRatio: 0, setupDone: false, state: undefined };
+    const engine: Engine = { renderer, scene, camera, width: 0, height: 0, pixelRatio: 0, setupDone: false, state: undefined, bloom: null };
+    engineRef.current = engine;
 
     // A lost context would otherwise export silently blank frames.
     const onContextLost = () =>
@@ -218,6 +342,7 @@ function Three3DCanvas<S>({
     return () => {
       canvas.removeEventListener("webglcontextlost", onContextLost);
       engineRef.current = null;
+      if (engine.bloom) disposeBloom(engine.bloom);
       disposeScene(scene);
       renderer.dispose();
       renderer.forceContextLoss();
@@ -227,24 +352,40 @@ function Three3DCanvas<S>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fonts + textures: wait once, holding the frame until the first draw that uses them.
+  // Fonts + textures + models: wait once, holding the frame until the first draw that uses them.
   useLayoutEffect(() => {
-    if (textures) return;
-    const entries = Object.entries(textureUrls ?? {});
+    if (loaded) return;
+    const textureEntries = Object.entries(textureUrls ?? {});
+    const modelEntries = Object.entries(modelUrls ?? {});
     const release = holdFrame();
     let cancelled = false;
-    let loaded: THREE.Texture[] = [];
+    let textureList: THREE.Texture[] = [];
+    let modelList: Three3DModel[] = [];
+    const disposeAll = () => {
+      for (const texture of textureList) texture.dispose();
+      for (const model of modelList) disposeTree(model.scene);
+    };
     const fonts = document.fonts?.ready ?? Promise.resolve();
-    Promise.all([fonts, Promise.all(entries.map(([name, url]) => loadTexture(name, url)))]).then(
-      ([, list]) => {
-        loaded = list;
+    Promise.all([
+      fonts,
+      Promise.all(textureEntries.map(([name, url]) => loadTexture(name, url))),
+      Promise.all(modelEntries.map(([name, url]) => loadModel(name, url))),
+    ]).then(
+      ([, textures, models]) => {
+        textureList = textures;
+        modelList = models;
         if (cancelled) {
-          for (const texture of list) texture.dispose();
+          disposeAll();
           return;
         }
-        // flushSync: the frame effect has drawn with the textures before the hold is released.
+        // flushSync: the frame effect has drawn with the textures and models before the hold is released.
         try {
-          flushSync(() => setTextures(Object.fromEntries(entries.map(([name], i) => [name, list[i]]))));
+          flushSync(() =>
+            setLoaded({
+              textures: Object.fromEntries(textureEntries.map(([name], i) => [name, textures[i]])),
+              models: Object.fromEntries(modelEntries.map(([name], i) => [name, models[i]])),
+            }),
+          );
         } finally {
           release();
         }
@@ -259,7 +400,7 @@ function Three3DCanvas<S>({
     );
     return () => {
       cancelled = true;
-      for (const texture of loaded) texture.dispose();
+      disposeAll();
       release();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -268,25 +409,55 @@ function Three3DCanvas<S>({
   // Frame: runs after every commit (each time change), so the picture is a function of `time`.
   useLayoutEffect(() => {
     const engine = engineRef.current;
-    if (!engine || !textures) return;
+    if (!engine || !loaded) return;
     const { renderer, scene, camera } = engine;
     const ratio = pixelRatio();
+    const glow = bloomSettings(bloom);
+    if (glow && !engine.bloom) {
+      const composer = new EffectComposer(renderer);
+      const pass = new UnrealBloomPass(new THREE.Vector2(width, height), glow.strength, glow.radius, glow.threshold);
+      composer.addPass(new RenderPass(scene, camera));
+      composer.addPass(pass);
+      composer.addPass(new OutputPass());
+      engine.bloom = { composer, pass };
+      engine.width = 0; // size the new composer below
+    } else if (!glow && engine.bloom) {
+      disposeBloom(engine.bloom);
+      engine.bloom = null;
+    }
     if (engine.width !== width || engine.height !== height || engine.pixelRatio !== ratio) {
       renderer.setPixelRatio(ratio);
       renderer.setSize(width, height, false);
+      engine.bloom?.composer.setPixelRatio(ratio);
+      engine.bloom?.composer.setSize(width, height);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       engine.width = width;
       engine.height = height;
       engine.pixelRatio = ratio;
     }
-    const ctx: Three3DContext = { THREE, scene, camera, renderer, width, height, textures };
+    if (glow && engine.bloom) {
+      engine.bloom.pass.strength = glow.strength;
+      engine.bloom.pass.radius = glow.radius;
+      engine.bloom.pass.threshold = glow.threshold;
+    }
+    const ctx: Three3DContext = { THREE, scene, camera, renderer, width, height, textures: loaded.textures, models: loaded.models };
     if (!engine.setupDone) {
       engine.setupDone = true;
+      if (environment) addStudioEnvironment(renderer, scene, environment === true ? 1 : environment);
       engine.state = setup?.(ctx);
     }
     render?.(time, { ...ctx, state: engine.state as S, time, localTime, progress });
-    if (autoRender) renderer.render(scene, camera);
+    if (!autoRender) return;
+    if (engine.bloom) {
+      // WebGL starts with clear alpha 1 and the renderer only pushes its own (0: transparent)
+      // inside renderer.render, after RenderPass has cleared: without this the layer turns opaque.
+      renderer.setClearAlpha(renderer.getClearAlpha());
+      // 0: no frame delta, so the composer never reads its own clock.
+      engine.bloom.composer.render(0);
+    } else {
+      renderer.render(scene, camera);
+    }
   });
 
   if (failure) throw failure;

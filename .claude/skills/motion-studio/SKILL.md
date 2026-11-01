@@ -119,6 +119,11 @@ other than changing the animation, run `fail <id> "<short reason>"` and tell the
   a Sprite. `setup` builds the scene once; `render` sets camera and objects to absolute values from
   `t` (no `+=`, no `setAnimationLoop`, no `THREE.Clock`; `THREE.MathUtils.seededRandom(i)` for
   variety). Images via `textures={{ logo: "assets/logo.png" }}`. Titles stay 2D Sprites above it.
+  glTF models via `models={{ product: "assets/product.glb" }}` (then `models.product.scene` in
+  setup; centre and scale it from `new THREE.Box3().setFromObject(…)`), studio reflections via
+  `environment` (needed for metal and glass; with `renderer.toneMapping = THREE.NeutralToneMapping`
+  so product colours stay true, ACES washes them out), glow via `bloom` (only colour above 1 glows, e.g.
+  `color.multiplyScalar(4)` with `toneMapped: false`). Draco / KTX2 models do not load: meshopt does.
 
   ```jsx
   <Sprite start={0} end={6} data-layer-name="3D boxes">

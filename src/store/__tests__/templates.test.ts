@@ -7,9 +7,11 @@ import {
   ensureRuntimeImport,
   ensureSpriteImport,
   imageLayerTemplate,
+  modelLayerTemplate,
   shapeLayerTemplate,
   textLayerTemplate,
 } from "../templates";
+import { findDisallowedImports, findForbiddenCalls } from "@/lib/ai/validate";
 import { SCENE } from "./fixture";
 
 describe("clipAtPlayhead", () => {
@@ -30,6 +32,7 @@ describe("templates parse and insert as Sprites", () => {
     ["rect", shapeLayerTemplate(timing, "rect", stage), "Rectangle", "sprite"],
     ["circle", shapeLayerTemplate(timing, "circle", stage), "Circle", "sprite"],
     ["image", imageLayerTemplate(timing, "assets/logo.png", 'logo "v2".png'), 'logo "v2".png', "sprite"],
+    ["model", modelLayerTemplate(timing, "assets/chair.glb", "Chair"), "Chair", "sprite"],
   ])("%s template", (_label, jsx, name, kind) => {
     const { source, id } = insertLayer(SCENE, null, jsx);
     const scene = parseScene(source);
@@ -46,6 +49,20 @@ describe("templates parse and insert as Sprites", () => {
     const node = parseScene(source).byId[id];
     expect(node.children[0].kind).toBe("image");
     expect(source).toContain('src="assets/logo.png"');
+  });
+
+  it("model template is one Three3D canvas layer that loads the asset with reflections, contract-clean", () => {
+    const jsx = modelLayerTemplate(timing, "assets/chair.glb", "Chair");
+    const { source, id } = insertLayer(SCENE, null, jsx);
+    const node = parseScene(source).byId[id];
+    expect(node.children.map((c) => c.kind)).toEqual(["canvas"]);
+    expect(jsx).toContain('models={{ model: "assets/chair.glb" }}');
+    expect(jsx).toMatch(/^\s+environment$/m);
+    // THREE comes from setup's context, so the scene needs no extra import.
+    expect(jsx).toContain("setup={({ THREE,");
+    expect(jsx).not.toMatch(/\+=|Math\.random/);
+    expect(findForbiddenCalls(jsx)).toEqual([]);
+    expect(findDisallowedImports(source)).toEqual([]);
   });
 });
 

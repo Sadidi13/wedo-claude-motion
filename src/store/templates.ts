@@ -1,8 +1,9 @@
 /**
- * JSX templates for the "+ Text / + Image / + Shape / + Sound" buttons and the
- * small source helpers around them (clip placement at the playhead, asset
- * paths, making sure `Sprite` / `Audio` are imported). Pure string builders —
- * the parser's `insertLayer` assigns the `data-layer-id`s.
+ * JSX templates for the "+ Text / + Image / + Shape / + 3D model / + Sound"
+ * buttons and the small source helpers around them (clip placement at the
+ * playhead, asset paths, making sure `Sprite` / `Three3D` / `Audio` are
+ * imported). Pure string builders — the parser's `insertLayer` assigns the
+ * `data-layer-id`s.
  */
 
 export interface ClipTiming {
@@ -90,6 +91,44 @@ export function imageLayerTemplate(timing: ClipTiming, assetPath: string, name: 
       maxWidth: "80%",
       maxHeight: "80%",
       objectFit: "contain",
+    }}
+  />
+</Sprite>`;
+}
+
+/**
+ * A glTF model on its own <Three3D> layer: studio reflections and lights, the model centred
+ * and scaled so it fits the frame from any angle (its bounding sphere), turning slowly over
+ * the clip.
+ */
+export function modelLayerTemplate(timing: ClipTiming, assetPath: string, name: string): string {
+  return `${spriteOpen(timing, escapeAttr(name))}
+  <Three3D
+    models={{ model: "${assetPath}" }}
+    environment
+    setup={({ THREE, scene, camera, renderer, width, height, models }) => {
+      // Neutral (Khronos PBR Neutral) keeps the model's own colours; ACES washes them out.
+      renderer.toneMapping = THREE.NeutralToneMapping;
+      const key = new THREE.DirectionalLight("#ffffff", 1.8);
+      key.position.set(3, 5, 4);
+      scene.add(key);
+      const rim = new THREE.DirectionalLight("#a8bcff", 1.2);
+      rim.position.set(-4, 2, -3);
+      scene.add(rim);
+      const model = models.model.scene;
+      const sphere = new THREE.Box3().setFromObject(model).getBoundingSphere(new THREE.Sphere());
+      model.position.sub(sphere.center);
+      const turntable = new THREE.Group();
+      turntable.add(model);
+      turntable.scale.setScalar(1 / (sphere.radius || 1));
+      scene.add(turntable);
+      const fit = 1.15 / Math.tan((camera.fov * Math.PI) / 360) / Math.min(1, width / height);
+      camera.position.set(0, 0.25 * fit, fit);
+      camera.lookAt(0, 0, 0);
+      return { turntable };
+    }}
+    render={(t, { state, localTime }) => {
+      state.turntable.rotation.y = localTime * 0.6;
     }}
   />
 </Sprite>`;

@@ -1,14 +1,16 @@
 /** Bundled samples must be contract-clean: ≥ 5 named top-level Sprites, zero parse warnings, stable ids. */
 import { describe, expect, it } from "vitest";
 import { findDisallowedImports, findForbiddenCalls } from "@/lib/ai/validate";
+import { dataUrlToBytes } from "@/lib/importer/dataUrl";
 import { ensureLayerIds, listLayerIds, parseScene } from "@/lib/parser";
 import { samples } from "../index";
 
 const ALLOWED_IMPORTS = /^(react|react-dom(\/client)?|lucide-react|three|gsap(\/\w+)?|\.\/animations\.jsx|\.\/[\w./-]+)$/;
 
 describe("samples", () => {
-  it("ships product-launch, lower-third, dolly-3d and kinetic-type with the contract meta", () => {
-    expect(samples.map((s) => s.id)).toEqual(["product-launch", "lower-third", "dolly-3d", "kinetic-type"]);
+  it("ships product-launch, lower-third, dolly-3d, kinetic-type and product-3d with the contract meta", () => {
+    expect(samples.map((s) => s.id)).toEqual(["product-launch", "lower-third", "dolly-3d", "kinetic-type", "product-3d"]);
+    expect(samples[4].project.meta).toEqual({ width: 1080, height: 1920, duration: 6, fps: 30, background: "#0a0d12" });
     expect(samples[3].project.meta).toEqual({ width: 1080, height: 1920, duration: 5, fps: 30, background: "#0b0b12" });
     expect(samples[0].project.meta).toEqual({ width: 1280, height: 720, duration: 8, fps: 30, background: "#0b0b12" });
     expect(samples[1].project.meta).toEqual({ width: 1920, height: 1080, duration: 5, fps: 30, background: "#101418" });
@@ -32,6 +34,33 @@ describe("samples", () => {
     expect(findDisallowedImports(source)).toEqual([]);
     expect(findForbiddenCalls(source)).toEqual([]);
     expect(parseScene(source).layers.map((l) => l.name)).toEqual(["Background", "Kicker", "Headline", "Underline", "Subtitle"]);
+  });
+
+  it("product-3d loads its bundled glTF through <Three3D models> with reflections and bloom", () => {
+    const { files } = samples[4].project;
+    const source = files["scene.jsx"].content;
+    expect(files["assets/bottle.glb"]).toMatchObject({ path: "assets/bottle.glb", kind: "asset" });
+    expect(files["assets/bottle.glb"].content).toMatch(/^data:model\/gltf-binary;base64,Z2xURg/); // "glTF" magic
+    expect(source).toContain('models={{ bottle: "assets/bottle.glb" }}');
+    expect(source).toMatch(/^\s+environment$/m);
+    expect(source).toContain("bloom={{");
+    expect(source).not.toMatch(/three\/addons|three\/examples|GLTFLoader|performance\.now|setAnimationLoop|\+=/);
+    expect(findDisallowedImports(source)).toEqual([]);
+    expect(findForbiddenCalls(source)).toEqual([]);
+    const scene = parseScene(source);
+    expect(scene.layers.map((l) => l.name)).toEqual(["Backdrop", "Product", "Kicker", "Title", "Call to action"]);
+    expect(scene.byId.product.children.map((c) => [c.id, c.kind])).toEqual([["bottle", "canvas"]]);
+  });
+
+  it("product-3d's model parses with three's GLTFLoader: body, label and cap", async () => {
+    const { GLTFLoader } = await import("three/addons/loaders/GLTFLoader.js");
+    const { bytes } = dataUrlToBytes(samples[4].project.files["assets/bottle.glb"].content);
+    const gltf = await new GLTFLoader().parseAsync(bytes.slice().buffer, "");
+    const meshes: string[] = [];
+    gltf.scene.traverse((object) => {
+      if ((object as { isMesh?: boolean }).isMesh) meshes.push(object.name);
+    });
+    expect(meshes).toEqual(["Body", "Label", "Cap"]);
   });
 
   it.each(samples.map((s) => [s.id, s] as const))("%s parses with ≥ 5 named top-level Sprites and no warnings", (_id, sample) => {

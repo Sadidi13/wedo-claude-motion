@@ -54,6 +54,7 @@ import {
   ensureRuntimeImport,
   ensureSpriteImport,
   imageLayerTemplate,
+  modelLayerTemplate,
   shapeLayerTemplate,
   textLayerTemplate,
 } from "./templates";
@@ -139,6 +140,8 @@ export interface EditorState {
   setStageMeta(meta: Partial<StageMeta>): void;
   addTextLayer(): void;
   addImageLayer(file: File): Promise<void>;
+  /** a .glb / .gltf file on its own <Three3D> layer at the playhead, lit and turning */
+  addModelLayer(file: File): Promise<void>;
   addShapeLayer(kind: ShapeKind): void;
   /** an audio file as an <Audio> clip at the playhead (its own length) */
   addAudioLayer(file: File): Promise<void>;
@@ -357,10 +360,11 @@ export const useEditorStore = create<EditorState>()((set, get) => {
     rafHandle = requestAnimationFrame(tick);
   };
 
-  const insertTemplate = (jsx: string, base?: Project, runtimeName = "Sprite"): string => {
+  const insertTemplate = (jsx: string, base?: Project, runtimeNames: string | string[] = "Sprite"): string => {
     const current = get().project;
     if (!current) throw new Error("No project loaded");
-    const { source, id } = parserInsertLayer(ensureRuntimeImport(entrySource(current), runtimeName), null, jsx);
+    const withImports = [runtimeNames].flat().reduce(ensureRuntimeImport, entrySource(current));
+    const { source, id } = parserInsertLayer(withImports, null, jsx);
     commitSource(source, { recordHistory: true, base });
     set({ selectedId: id });
     return id;
@@ -631,6 +635,22 @@ export const useEditorStore = create<EditorState>()((set, get) => {
         const withAsset: Project = { ...project, files: { ...project.files, [path]: asset } };
         const timing = clipAtPlayhead(time, scene.meta.duration, scene.meta.fps);
         insertTemplate(imageLayerTemplate(timing, path, file.name), withAsset);
+      } catch (error) {
+        set({ notice: { kind: "error", message: errorMessage(error) } });
+      }
+    },
+
+    async addModelLayer(file) {
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        const { project, scene, time } = get();
+        if (!project || !scene) return;
+        const path = assetPathFor(file.name, Object.keys(project.files));
+        const asset: ProjectFile = { path, kind: "asset", content: dataUrl };
+        const withAsset: Project = { ...project, files: { ...project.files, [path]: asset } };
+        const timing = clipAtPlayhead(time, scene.meta.duration, scene.meta.fps, 4);
+        const name = file.name.replace(/\.[^.]+$/, "") || "3D model";
+        insertTemplate(modelLayerTemplate(timing, path, name), withAsset, ["Sprite", "Three3D"]);
       } catch (error) {
         set({ notice: { kind: "error", message: errorMessage(error) } });
       }

@@ -74,6 +74,8 @@ Rules (the AI system prompt and the importer both enforce / assume these):
   `./animations`, `@motion/runtime`, `motion-runtime`), and relative project files (`./Card.jsx`,
   `./styles.css`). Anything else fails to load with a clear error.
 * Assets are referenced by relative path (`assets/logo.png`); the loader rewrites them to data URLs.
+  Asset files are images, video, audio, fonts and glTF models (`.glb`, `.gltf`;
+  `src/lib/importer/dataUrl.ts`).
 * `data-motion='{…}'` on any element is the designer's move / scale / rotate / opacity, static or
   keyframed, applied by the runtime on top of the element's own styles (docs/TRANSFORM.md). Code
   that edits a scene keeps these attributes as they are.
@@ -94,7 +96,7 @@ Rules (the AI system prompt and the importer both enforce / assume these):
 | `interpolate(input:number[], output:number[], easing?)` | `(t:number)=>number` | piecewise linear with clamping; `easing` one fn or one per segment |
 | `animate({ from, to, start, end, ease? })` | `(t:number)=>number` | single tween, default `Easing.easeInOutCubic` |
 | `clamp(v, min, max)`, `lerp(a, b, t)` | helpers | |
-| `Three3D` | `({ setup?, render?, width?, height?, camera?, textures?, antialias=true, autoRender=true, style, ...data-* })` | one three.js scene on one WebGL canvas = **one layer** (`src/runtime/three.tsx`). Renders `<div data-three3d style="position:absolute;left:0;top:0;width;height">` (default size: the Stage) carrying the `data-*` props, with the canvas inside. See "3D scenes" below. |
+| `Three3D` | `({ setup?, render?, width?, height?, camera?, textures?, models?, environment?, bloom?, antialias=true, autoRender=true, style, ...data-* })` | one three.js scene on one WebGL canvas = **one layer** (`src/runtime/three.tsx`). Renders `<div data-three3d style="position:absolute;left:0;top:0;width;height">` (default size: the Stage) carrying the `data-*` props, with the canvas inside. See "3D scenes" below. |
 | `Audio` | `({ src?, sfx?, start=0, end?, from=0, volume=1, fadeIn=0, fadeOut=0, loop=false, ...data-* })` | one sound clip = **one layer** (`src/runtime/audio.tsx`). Renders a hidden marker `<span data-audio>` with the `data-*` props. Plays in sync with the editor's playback; records itself for the export mix in render mode. `sfx` names a built-in sound (`src/lib/audio/sfx.ts`). See docs/AUDIO.md. |
 | `useGsapTimeline` | `(build: (tl, scope) => void, deps = []) => RefObject` | one paused GSAP timeline scoped to the element the returned ref is attached to, seeked to the Sprite's local time (stage time outside a Sprite) on every render (`src/runtime/gsap.tsx`). See "GSAP" below. |
 
@@ -112,22 +114,37 @@ A 3D scene is still a pure function of time. `<Three3D>` owns a `WebGLRenderer` 
 `preserveDrawingBuffer: true`), a `Scene` and a `PerspectiveCamera` (`camera={{ fov, near, far }}`,
 default 45 / 0.1 / 1000) and never runs a loop:
 
-1. **setup** — once per mount, after web fonts are ready and `textures` (`{ name: url }`, project
-   assets become data URLs) are decoded: `setup({ THREE, scene, camera, renderer, width, height,
-   textures })` builds meshes, lights and materials and returns whatever `render` needs (`state`).
+1. **setup** — once per mount, after web fonts are ready, `textures` (`{ name: url }`, project
+   assets become data URLs) are decoded and `models` (`{ name: url }`, .glb or .gltf with embedded
+   data) are parsed: `setup({ THREE, scene, camera, renderer, width, height, textures, models })`
+   builds meshes, lights and materials and returns whatever `render` needs (`state`). Each model is
+   `{ scene: Group, animations: AnimationClip[], cameras: Camera[] }`. With `environment` (`true`
+   or an intensity) `scene.environment` already holds studio reflections (three's RoomEnvironment
+   through PMREM), which metallic and glossy glTF materials need.
 2. **render** — after every commit, i.e. every time change, in a layout effect (so under `__seek`'s
    `flushSync` the canvas is drawn before `__seek` returns): `render(t, { …ctx, state, time,
    localTime, progress })`, then `renderer.render(scene, camera)` unless `autoRender={false}`. It sets
    every moving property to an absolute value computed from `t`, never `+=`, because frames are
-   rendered out of order and by several workers.
-3. **unmount** — geometries, materials, textures and the renderer are disposed and the WebGL context
-   is released. A lost context or a WebGL-less browser throws into the Stage's error boundary
-   (reported as a preview `error`, and an export failure instead of blank frames).
+   rendered out of order and by several workers. With `bloom` (`true` or `{ strength=0.8,
+   radius=0.4, threshold=1 }`, changeable per frame) the automatic draw goes through an
+   EffectComposer (RenderPass → UnrealBloomPass → OutputPass, rendered with a zero delta so no clock
+   is read); the threshold is linear luminance before tone mapping, so only over-bright colour glows,
+   and the canvas keeps its transparency around the glow.
+3. **unmount** — geometries, materials, textures, models, the bloom passes and the renderer are
+   disposed and the WebGL context is released. A lost context or a WebGL-less browser throws into the
+   Stage's error boundary (reported as a preview `error`, and an export failure instead of blank
+   frames). A model that fails to parse fails the same way; Draco / KTX2 files get a hint to
+   re-export with meshopt, because their decoders are files the export renderer may not fetch.
 
-No `renderer.setAnimationLoop`, `requestAnimationFrame`, `THREE.Clock`, `performance.now()` or
-`Math.random()` (use `THREE.MathUtils.seededRandom(seed)`); animation clips use `mixer.setTime(t)`;
-images come through `textures`, not loaders. The canvas is transparent where nothing is drawn; text and
-titles are ordinary 2D layers above it. Example (a camera dolly through lit boxes, then a title lands):
+The glTF loader, meshopt decoder, RoomEnvironment and bloom passes are `three/addons` modules
+imported by the runtime; scene code still imports only `three`. No `renderer.setAnimationLoop`,
+`requestAnimationFrame`, `THREE.Clock`, `performance.now()` or `Math.random()` (use
+`THREE.MathUtils.seededRandom(seed)`); animation clips use `mixer.setTime(t)`; images and models
+come through `textures` and `models`, not loaders. The canvas is transparent where nothing is drawn;
+text and titles are ordinary 2D layers above it. The Layers panel's 3D-model button adds a .glb as
+an asset plus a `<Three3D models environment>` layer that centres, scales and turns it
+(`modelLayerTemplate`, `src/store/templates.ts`); the bundled `product-3d` sample shows models,
+environment and bloom together. Example (a camera dolly through lit boxes, then a title lands):
 
 ```jsx
 import React from "react";
@@ -475,8 +492,10 @@ Ship at least **`product-launch`** (1280×720, 8s, 30fps): gradient background, 
 subtitle, three staggered feature cards with lucide icons, a growing bar chart (4 bars) with value
 labels, logo/CTA outro — every top-level element a named `<Sprite>` so the layers panel looks great.
 Written exactly in the §1 style so it doubles as the reference the AI prompt links to. Also shipped:
-`lower-third` (alpha overlay), `dolly-3d` (1080×1920, a `<Three3D>` layer under 2D titles) and
-`kinetic-type` (1080×1920, GSAP SplitText / DrawSVG / TextPlugin through `useGsapTimeline`).
+`lower-third` (alpha overlay), `dolly-3d` (1080×1920, a `<Three3D>` layer under 2D titles),
+`kinetic-type` (1080×1920, GSAP SplitText / DrawSVG / TextPlugin through `useGsapTimeline`) and
+`product-3d` (1080×1920, a glTF bottle through `<Three3D models environment bloom>`; its project
+also carries `assets/bottle.glb`, generated by `scripts/make-sample-model.mjs`).
 
 ---
 

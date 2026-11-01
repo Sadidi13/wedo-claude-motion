@@ -27,6 +27,8 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   woff2: "font/woff2",
   ttf: "font/ttf",
   otf: "font/otf",
+  glb: "model/gltf-binary",
+  gltf: "model/gltf+json",
 };
 
 const OCTET_STREAM = "application/octet-stream";
@@ -38,7 +40,7 @@ export function extensionOf(path: string): string {
   return dot <= 0 ? "" : base.slice(dot + 1).toLowerCase();
 }
 
-/** True for image / video / audio / font files that become `kind: "asset"` wherever they live. */
+/** True for image / video / audio / font / 3D model files that become `kind: "asset"` wherever they live. */
 export function isAssetPath(path: string): boolean {
   return extensionOf(path) in MIME_BY_EXTENSION;
 }

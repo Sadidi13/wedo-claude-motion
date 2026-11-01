@@ -9,7 +9,10 @@ describe("dataUrl", () => {
     expect(mimeTypeFor("a/b.woff2")).toBe("font/woff2");
     expect(mimeTypeFor("clip.mp4")).toBe("video/mp4");
     expect(mimeTypeFor("notes.txt")).toBe("application/octet-stream");
+    expect(mimeTypeFor("assets/Chair.GLB")).toBe("model/gltf-binary");
+    expect(mimeTypeFor("assets/chair.gltf")).toBe("model/gltf+json");
     expect(isAssetPath("x.svg")).toBe(true);
+    expect(isAssetPath("models/x.glb")).toBe(true);
     expect(isAssetPath("x.jsx")).toBe(false);
     expect(isAssetPath("noext")).toBe(false);
   });

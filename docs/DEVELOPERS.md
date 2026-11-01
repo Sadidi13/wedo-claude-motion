@@ -89,7 +89,9 @@ export default function Scene() {
   (pinned) with the plugins in `src/lib/gsapModules.ts`, the runtime (`./animations.jsx`) and
   relative project files (`.jsx`, `.css`, assets).
 * 3D: the runtime's `<Three3D setup render>` draws a three.js scene as one layer, still a pure
-  function of time (`docs/CONTRACTS.md` §1 "3D scenes", sample `dolly-3d`).
+  function of time (`docs/CONTRACTS.md` §1 "3D scenes", sample `dolly-3d`). glTF models
+  (`models`), studio reflections (`environment`) and `bloom` use `three/addons` inside the runtime
+  only (sample `product-3d`; regenerate its model with `node scripts/make-sample-model.mjs`).
 * GSAP: `useGsapTimeline(build, deps)` builds a paused timeline that the runtime seeks to the
   Sprite's local time (`docs/CONTRACTS.md` §1 "GSAP", sample `kinetic-type`). GSAP itself is not
   MIT: it is under GreenSock / Webflow's "Standard No Charge" license.

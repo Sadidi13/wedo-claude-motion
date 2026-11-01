@@ -22,6 +22,12 @@ First public release, under the MIT license.
   `<Three3D setup render>`, one layer, still a pure function of time. Export waits for its textures,
   renders WebGL on the GPU (SwiftShader fallback, or `MOTION_STUDIO_WEBGL=swiftshader`), and the
   `3D dolly` sample shows a camera move through lit boxes under a 2D title.
+- 3D models, reflections and glow: `<Three3D models={{ product: "assets/product.glb" }}>` parses
+  glTF / GLB project assets (meshopt included) before the first frame and hands them to `setup`;
+  `environment` adds studio reflections so metal and glass read right; `bloom` makes over-bright
+  colour glow while the canvas stays transparent. The Layers panel's 3D-model button turns a .glb
+  into a lit, framed, turning layer, and the `3D product (glTF)` sample (a bottle built in code by
+  `scripts/make-sample-model.mjs`) shows all three.
 - GSAP: scenes may import `gsap` (pinned 3.15.0) and SplitText, DrawSVG, MorphSVG, MotionPath,
   CustomEase and TextPlugin. The runtime's `useGsapTimeline` builds a paused timeline and seeks it to
   the Sprite's local time, so GSAP scrubs and exports frame-exactly; GSAP's own clock is stopped.

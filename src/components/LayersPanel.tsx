@@ -6,7 +6,8 @@
  * kind icon · name (double-click to rename) · timing badge · eye · lock, with
  * hover actions and a right-click menu for duplicate / delete / bring
  * forward / send backward / wrap in Sprite. The header inserts Text / Image /
- * Shape layers and Sound (an audio file or a built-in sound effect) at the playhead.
+ * Shape / 3D model (.glb) layers and Sound (an audio file or a built-in sound
+ * effect) at the playhead.
  */
 import {
   ArrowDown,
@@ -245,6 +246,7 @@ export function LayersPanel() {
   const [soundMenu, setSoundMenu] = useState<{ x: number; y: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
+  const modelInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const closeShapeMenu = useCallback(() => setShapeMenu(null), []);
@@ -281,6 +283,13 @@ export function LayersPanel() {
         >
           <Shapes size={14} />
         </IconButton>
+        <IconButton
+          title="Add a 3D model (.glb) at the playhead: lit, framed and turning"
+          disabled={disabled}
+          onClick={() => modelInputRef.current?.click()}
+        >
+          <Cuboid size={14} />
+        </IconButton>
         <Button
           size="sm"
           variant="ghost"
@@ -316,6 +325,18 @@ export function LayersPanel() {
             const file = event.target.files?.[0];
             event.target.value = "";
             if (file) void store.addImageLayer(file);
+          }}
+        />
+        <input
+          ref={modelInputRef}
+          type="file"
+          accept=".glb,.gltf,model/gltf-binary,model/gltf+json"
+          className="hidden"
+          aria-label="3D model file"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void store.addModelLayer(file);
           }}
         />
       </div>
