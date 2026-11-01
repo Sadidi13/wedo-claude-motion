@@ -64,13 +64,20 @@ export function ffmpegPath(): string {
 }
 
 /**
- * yuv420p / yuva420p need even dimensions; crop at most one row/column
- * (exact pixels, no resampling) instead of failing. Returns [] when even.
+ * The frames are sRGB screenshots. Left alone, ffmpeg turns them into YUV with
+ * the BT.601 matrix and writes no colour tags, while players decode untagged HD
+ * video as BT.709, so colours shift on playback (#22C55E came back as #16AF5C).
+ * Convert with BT.709 at limited range and tag the stream to match.
+ * With `evenSize`, also crop at most one row/column (exact pixels, no
+ * resampling) because yuv420p / yuva420p need even dimensions.
  */
-function evenDimensionFilter(width: number, height: number): string[] {
-  const odd = width % 2 !== 0 || height % 2 !== 0;
-  return odd ? ["-vf", "crop=trunc(iw/2)*2:trunc(ih/2)*2:0:0"] : [];
+function yuvFilter(pixFmt: string, evenSize?: { width: number; height: number }): string[] {
+  const odd = evenSize !== undefined && (evenSize.width % 2 !== 0 || evenSize.height % 2 !== 0);
+  const crop = odd ? "crop=trunc(iw/2)*2:trunc(ih/2)*2:0:0," : "";
+  return ["-vf", `${crop}scale=out_color_matrix=bt709:out_range=tv,format=${pixFmt}`];
 }
+
+const BT709_TAGS = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"];
 
 export function buildEncodeArgs(jobDir: string, opts: EncodeOptions): EncodePlan {
   const transparent = opts.transparent && supportsAlpha(opts.format);
@@ -92,9 +99,9 @@ export function buildEncodeArgs(jobDir: string, opts: EncodeOptions): EncodePlan
           [
             ...input,
             ...audio.input,
-            ...evenDimensionFilter(opts.width, opts.height),
+            ...yuvFilter("yuv420p", opts),
             "-c:v", "libx264", "-preset", "slow", "-crf", String(opts.quality),
-            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+            "-pix_fmt", "yuv420p", ...BT709_TAGS, "-movflags", "+faststart",
             ...audio.output,
             ...rate, output,
           ],
@@ -105,13 +112,14 @@ export function buildEncodeArgs(jobDir: string, opts: EncodeOptions): EncodePlan
     }
     case "webm": {
       const audio = sound(["-c:a", "libopus", "-b:a", "160k"]);
+      const pixFmt = transparent ? "yuva420p" : "yuv420p";
       return {
         passes: [
           [
             ...input,
             ...audio.input,
-            ...evenDimensionFilter(opts.width, opts.height),
-            "-c:v", "libvpx-vp9", "-pix_fmt", transparent ? "yuva420p" : "yuv420p", "-b:v", "0", "-crf", "24",
+            ...yuvFilter(pixFmt, opts),
+            "-c:v", "libvpx-vp9", "-pix_fmt", pixFmt, ...BT709_TAGS, "-b:v", "0", "-crf", "24",
             ...audio.output,
             ...rate, output,
           ],
@@ -122,12 +130,14 @@ export function buildEncodeArgs(jobDir: string, opts: EncodeOptions): EncodePlan
     }
     case "mov": {
       const audio = sound(["-c:a", "pcm_s16le"]);
+      const pixFmt = transparent ? "yuva444p10le" : "yuv444p10le";
       return {
         passes: [
           [
             ...input,
             ...audio.input,
-            "-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", transparent ? "yuva444p10le" : "yuv444p10le",
+            ...yuvFilter(pixFmt),
+            "-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", pixFmt, ...BT709_TAGS,
             ...audio.output,
             ...rate, output,
           ],

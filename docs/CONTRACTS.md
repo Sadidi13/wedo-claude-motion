@@ -441,7 +441,10 @@ Dark UI, English labels, Tailwind v4, lucide-react icons. Must look like a real 
 * ffmpeg (`FFMPEG_PATH` or `ffmpeg`): mp4 `-c:v libx264 -preset slow -crf <q> -pix_fmt yuv420p
   -movflags +faststart`; webm `-c:v libvpx-vp9 -pix_fmt yuva420p -b:v 0 -crf 24` (alpha);
   mov `-c:v prores_ks -profile:v 4444 -pix_fmt yuva444p10le` (alpha); gif two-pass palettegen/
-  paletteuse; png-sequence → zip. Always `-r <fps>` and `-framerate <fps>` input.
+  paletteuse; png-sequence → zip. Always `-r <fps>` and `-framerate <fps>` input. mp4, webm and
+  mov convert the sRGB frames with `scale=out_color_matrix=bt709:out_range=tv` and tag the stream
+  BT.709 / limited range (`-colorspace -color_primaries -color_trc bt709 -color_range tv`): ffmpeg's
+  default BT.601 matrix on an untagged file shifts colours in players that assume BT.709 for HD.
   Scale filter only when `scale === 2` is **not** requested as the output size (we export at the
   supersampled size by default; option `downscale` is not part of v1).
 * Errors land in `status.json` as `state:"error"`. Browser and ffmpeg are always closed/killed in `finally`.

@@ -1,4 +1,6 @@
 import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildEncodeArgs, ffmpegPath, runFfmpeg } from "../ffmpeg";
 import path from "node:path";
@@ -10,11 +12,17 @@ const out = (name: string) => path.join(job, name);
 
 const base = { fps: 30, width: 1280, height: 720, quality: 17, transparent: false } as const;
 const input = ["-y", "-framerate", "30", "-i", frames("jpg")];
+const bt709 = (pixFmt: string) => ["-vf", `scale=out_color_matrix=bt709:out_range=tv,format=${pixFmt}`];
+const tags = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"];
 
 describe("buildEncodeArgs", () => {
-  it("mp4: libx264 slow, crf, yuv420p, faststart", () => {
+  it("mp4: libx264 slow, crf, yuv420p converted and tagged as BT.709, faststart", () => {
     expect(buildEncodeArgs(job, { ...base, format: "mp4" })).toEqual({
-      passes: [[...input, "-c:v", "libx264", "-preset", "slow", "-crf", "17", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-r", "30", out("output.mp4")]],
+      passes: [[
+        ...input, ...bt709("yuv420p"),
+        "-c:v", "libx264", "-preset", "slow", "-crf", "17", "-pix_fmt", "yuv420p", ...tags, "-movflags", "+faststart",
+        "-r", "30", out("output.mp4"),
+      ]],
       output: out("output.mp4"),
       frameExt: "jpg",
     });
@@ -24,8 +32,8 @@ describe("buildEncodeArgs", () => {
     const plan = buildEncodeArgs(job, { ...base, format: "mp4", quality: 23, width: 1281, height: 720 });
     expect(plan.passes[0]).toEqual([
       ...input,
-      "-vf", "crop=trunc(iw/2)*2:trunc(ih/2)*2:0:0",
-      "-c:v", "libx264", "-preset", "slow", "-crf", "23", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+      "-vf", "crop=trunc(iw/2)*2:trunc(ih/2)*2:0:0,scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
+      "-c:v", "libx264", "-preset", "slow", "-crf", "23", "-pix_fmt", "yuv420p", ...tags, "-movflags", "+faststart",
       "-r", "30", out("output.mp4"),
     ]);
   });
@@ -33,21 +41,22 @@ describe("buildEncodeArgs", () => {
   it("webm: vp9 with alpha when transparent (png frames), yuv420p otherwise", () => {
     expect(buildEncodeArgs(job, { ...base, format: "webm", transparent: true })).toEqual({
       passes: [[
-        "-y", "-framerate", "30", "-i", frames("png"),
-        "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-b:v", "0", "-crf", "24", "-r", "30", out("output.webm"),
+        "-y", "-framerate", "30", "-i", frames("png"), ...bt709("yuva420p"),
+        "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", ...tags, "-b:v", "0", "-crf", "24", "-r", "30", out("output.webm"),
       ]],
       output: out("output.webm"),
       frameExt: "png",
     });
     expect(buildEncodeArgs(job, { ...base, format: "webm" }).passes[0]).toEqual([
-      ...input, "-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p", "-b:v", "0", "-crf", "24", "-r", "30", out("output.webm"),
+      ...input, ...bt709("yuv420p"),
+      "-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p", ...tags, "-b:v", "0", "-crf", "24", "-r", "30", out("output.webm"),
     ]);
   });
 
-  it("mov: prores 4444 with 10-bit alpha when transparent", () => {
-    expect(buildEncodeArgs(job, { ...base, format: "mov", transparent: true }).passes).toEqual([[
-      "-y", "-framerate", "30", "-i", frames("png"),
-      "-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le", "-r", "30", out("output.mov"),
+  it("mov: prores 4444 with 10-bit alpha when transparent, never cropped", () => {
+    expect(buildEncodeArgs(job, { ...base, format: "mov", transparent: true, width: 1281 }).passes).toEqual([[
+      "-y", "-framerate", "30", "-i", frames("png"), ...bt709("yuva444p10le"),
+      "-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le", ...tags, "-r", "30", out("output.mov"),
     ]]);
     expect(buildEncodeArgs(job, { ...base, format: "mov" }).passes[0]).toContain("yuv444p10le");
   });
@@ -73,6 +82,27 @@ describe("buildEncodeArgs", () => {
   it("png-sequence: no ffmpeg passes, zip output, png frames", () => {
     expect(buildEncodeArgs(job, { ...base, format: "png-sequence" })).toEqual({ passes: [], output: out("output.zip"), frameExt: "png" });
   });
+});
+
+describe.skipIf(ffmpegPath() === "ffmpeg")("mp4 colour with the bundled ffmpeg", () => {
+  it("decodes back to the frame's colour the way a BT.709 player reads it", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "motion-colour-"));
+    try {
+      await mkdir(path.join(dir, "frames"));
+      await runFfmpeg(["-v", "error", "-f", "lavfi", "-i", "color=c=0x22C55E:s=64x64:d=0.1:r=30", "-q:v", "2", path.join(dir, "frames", "f_%06d.jpg")]);
+      for (const pass of buildEncodeArgs(dir, { ...base, format: "mp4", width: 64, height: 64 }).passes) await runFfmpeg(pass);
+      const pixel = path.join(dir, "pixel.rgb");
+      await runFfmpeg([
+        "-v", "error", "-i", path.join(dir, "output.mp4"), "-frames:v", "1",
+        "-vf", "scale=in_color_matrix=bt709:in_range=tv,format=rgb24,crop=1:1:32:32", "-f", "rawvideo", pixel,
+      ]);
+      const [r, g, b] = await readFile(pixel);
+      // Before the BT.709 conversion this came back as about #16AF5C (green off by 22).
+      expect(Math.max(Math.abs(r - 0x22), Math.abs(g - 0xc5), Math.abs(b - 0x5e))).toBeLessThanOrEqual(6);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 describe("runFfmpeg", () => {
