@@ -179,10 +179,12 @@ describe("safety limits", () => {
     expect(AiEditRequestSchema.safeParse(makeRequest({ project: ok })).success).toBe(true);
   });
 
+  // 21 file-backed requests one after another: about 0.6 s alone, but over 5 s on Windows while the
+  // whole suite runs in parallel.
   it("caps the queue", async () => {
     for (let i = 0; i < MAX_PENDING_REQUESTS; i++) await createRequest(makeRequest());
     await expect(createRequest(makeRequest())).rejects.toMatchObject({ status: 429 });
-  });
+  }, 30_000);
 
   it("labels everything from the editor as untrusted in the brief", async () => {
     const record = await createRequest(
