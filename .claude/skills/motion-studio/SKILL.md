@@ -1,6 +1,6 @@
 ---
 name: motion-studio
-description: Build and edit animations in WeDo Claude Motion (the Motion Studio editor on localhost:3000), and answer the requests a designer sends from its Ask Claude tab. Use for any request in this workspace to make or change a video, animation, motion graphic, promo, teaser, intro, title card or reel (the user wants these created as layer-based Motion Studio scenes, not rendered video files), for "check Claude Motion" / «کلاد موشن رو چک کن», for "listen to Motion Studio" / "به موشن استودیو گوش بده", and whenever a `motion-bridge wait` background task finishes.
+description: Build and edit animations in WeDo Claude Motion (the Motion Studio editor on localhost:3000), and answer the requests a designer sends from its Ask Claude tab. Use for any request in this workspace to make or change a video, animation, motion graphic, promo, teaser, intro, title card or reel (the user wants these created as layer-based Motion Studio scenes, not rendered video files), for "open Claude Motion" / «کلاد موشن رو باز کن», for "check Claude Motion" / «کلاد موشن رو چک کن», for "listen to Motion Studio" / "به موشن استودیو گوش بده", and whenever a `motion-bridge wait` background task finishes.
 ---
 
 # Motion Studio bridge
@@ -10,22 +10,34 @@ function of time). This skill connects the chat to the running editor in both di
 command from the repository root (the folder holding `package.json` and `scripts/`):
 
 ```bash
-node scripts/motion-bridge.mjs <status|contract|project|wait|respond|fail|new|edit|board-styles|board-storyboard|board|board-choose|board-approve|qa> ...
+node scripts/motion-bridge.mjs <launch|autopilot|status|contract|project|wait|respond|fail|new|edit|board-styles|board-storyboard|board|board-choose|board-approve|qa> ...
 ```
 
 Scratch files go in `.motion-bridge/` (git-ignored). Details: `docs/CLAUDE-DESKTOP.md`. This skill is
 for Code sessions. The regular Claude chat uses the MCP connector `scripts/motion-studio-mcp.mjs`
 (`node scripts/motion-bridge.mjs install-chat` registers it in Claude Desktop), and
-`scripts/motion-autopilot.mjs` answers the editor with no session at all. Only one listener at a time:
-if the editor shows "Autopilot", do not also run `wait`.
+the autopilot (`scripts/motion-autopilot.mjs`, started and stopped by the editor) answers the editor
+with no session at all. Only one listener at a time: if the editor shows "Autopilot on", do not also
+run `wait`.
 
-## 0. Make sure the editor is running
+## 0. "Open Claude Motion": everything in the editor
+
+When the user says "open Claude Motion", «کلاد موشن رو باز کن», «کلاد موشن رو بیار» or "start Motion
+Studio" without asking for a particular video, run `node scripts/motion-bridge.mjs launch` (foreground;
+it returns once the editor is open). It starts the server when needed, turns the background autopilot
+on (unless a Claude chat already listens) and opens the editor. From then on the whole video happens
+in the editor: the storyboard, the build, edits from Ask Claude and the export, each step answered by
+the autopilot (Claude Opus 5.5; effort xhigh for storyboards and builds, high for edits). Waiting
+costs nothing; each step is one Claude Code run on the user's plan. Tell the user that in their
+language and stop: do not also run `wait`. `autopilot status|start|stop` reports or switches it (the
+"Autopilot" button in the editor's top bar does the same, and shows its log).
+
+## 0b. Make sure the editor is running
 
 1. `node scripts/motion-bridge.mjs status`.
-2. "not reachable": start the dev server. Use `preview_start` with the `motion-studio-dev` launch
-   config when it exists; otherwise run `pnpm dev` from the repo root with `run_in_background`. Then
-   open http://localhost:3000 for the user.
-3. "open: nothing shared yet": no editor tab is open. Open http://localhost:3000.
+2. "not reachable": `node scripts/motion-bridge.mjs start` starts the server in the background and
+   opens the editor (the first start can take a minute).
+3. "open: nothing shared yet": no editor tab is open. `node scripts/motion-bridge.mjs open`.
 
 ## 1. A new video asked for in the chat: storyboard first
 
@@ -75,7 +87,7 @@ editor's storyboard view (or tells you in the chat). Details: section 9 of the c
 When the user says "check Claude Motion", "check Motion Studio", «کلاد موشن رو چک کن» or
 «موشن استودیو رو چک کن», handle what the designer queued in the Ask Claude tab or decided on a
 storyboard: run `wait` once (it returns at once when something is queued), handle it as in
-section 3, and repeat until `status` shows 0 queued. Do not keep listening afterwards unless asked. If the editor shows "Autopilot", the
+section 3, and repeat until `status` shows 0 queued. Do not keep listening afterwards unless asked. If the editor shows "Autopilot on", the
 autopilot already answers requests: tell the user instead of competing with it.
 
 ## 3. Listening to the editor's Ask Claude tab

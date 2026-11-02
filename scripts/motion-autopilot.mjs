@@ -17,17 +17,25 @@
  *
  *   node scripts/motion-autopilot.mjs [--model <alias>] [--once]
  *
+ * Every run uses the same model (default claude-opus-5-5). Storyboard steps, the build and its
+ * quality pass are "deep" work and run at a higher effort than everyday edits.
+ *
+ * The editor usually starts and stops this script itself (src/lib/server/bridge/autopilot.ts);
+ * it reports what it is doing in <bridge>/autopilot.json either way.
+ *
  * Environment: MOTION_STUDIO_CLAUDE_BIN (default: `claude` on PATH, then
- * ~/.local/bin/claude.exe), MOTION_STUDIO_AUTOPILOT_MODEL, plus the
- * MOTION_STUDIO_URL / MOTION_STUDIO_BRIDGE_DIR of the bridge client.
+ * ~/.local/bin/claude.exe), MOTION_STUDIO_AUTOPILOT_MODEL (default claude-opus-5-5),
+ * MOTION_STUDIO_AUTOPILOT_EFFORT_DEEP (default xhigh), MOTION_STUDIO_AUTOPILOT_EFFORT (default
+ * high), plus the MOTION_STUDIO_URL / MOTION_STUDIO_BRIDGE_DIR of the bridge client.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
   BASE,
+  BRIDGE_DIR,
   BridgeError,
   BridgeValidationError,
   answer,
@@ -44,8 +52,20 @@ import {
   sleep,
 } from "./lib/bridge-client.mjs";
 
-const RUN_TIMEOUT_MS = 10 * 60_000;
+const DEFAULT_MODEL = "claude-opus-5-5";
+const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+/** How long one run may take: deep work (a whole video at a high effort) gets longer. */
+const RUN_TIMEOUT_MS = { deep: 30 * 60_000, normal: 10 * 60_000 };
 const POLL_MS = 1_000;
+/** While Claude works, the state file is refreshed this often so the editor shows "working", not "offline". */
+const HEARTBEAT_MS = 5_000;
+/** Otherwise it is re-written this often, so the editor's view heals if something overwrote it. */
+const KEEPALIVE_MS = 30_000;
+/** Started by the editor's server (src/lib/server/bridge/autopilot.ts): stop once that server has been gone this long. */
+const MANAGED = process.env.MOTION_STUDIO_AUTOPILOT_MANAGED === "1";
+const SERVER_GONE_MS = 10 * 60_000;
+/** Cleared at start when the installed Claude Code does not know `--effort`. */
+let effortSupported = true;
 /** Private, empty working folder (created at start): no project files, CLAUDE.md or settings around Claude Code. */
 let WORK_DIR = "";
 let CONTRACT_FILE = "";
@@ -68,10 +88,95 @@ function say(message) {
   console.log(`[${timestamp()}] ${message}`);
 }
 
+/** The effort for one kind of run: "deep" (storyboard steps, builds, their quality pass) or "normal" (edits). */
+function effortFor(kind) {
+  if (!effortSupported) return undefined;
+  const value = kind === "deep" ? (process.env.MOTION_STUDIO_AUTOPILOT_EFFORT_DEEP ?? "xhigh") : (process.env.MOTION_STUDIO_AUTOPILOT_EFFORT ?? "high");
+  return EFFORTS.has(value) ? value : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// What the editor sees (<bridge>/autopilot.json, read by src/lib/server/bridge/autopilot.ts)
+// ---------------------------------------------------------------------------
+
+const STATE_FILE = path.join(BRIDGE_DIR, "autopilot.json");
+const stateBase = { pid: process.pid, model: null, effort: null, startedAt: new Date().toISOString() };
+/** The state written when the process exits (signed-out / error replace the default). */
+let exitState = { state: "stopped", message: null };
+/** The state last reported (re-written by the keepalive). */
+let current = { state: "starting", message: null };
+
+function report(state, message = null) {
+  current = { state, message };
+  try {
+    mkdirSync(BRIDGE_DIR, { recursive: true });
+    writeFileSync(STATE_FILE, JSON.stringify({ ...stateBase, state, message, updatedAt: Date.now() }));
+  } catch {
+    // the editor shows the process as running anyway; nothing else depends on this file
+  }
+}
+
+/** Run `work` while telling the editor it is working (refreshed every few seconds), then back to listening. */
+async function working(what, work) {
+  report("working", what);
+  const beat = setInterval(() => report("working", what), HEARTBEAT_MS);
+  try {
+    return await work();
+  } finally {
+    clearInterval(beat);
+    report("listening");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// One autopilot at a time: <bridge>/autopilot.lock holds the running one's pid
+// ---------------------------------------------------------------------------
+
+const LOCK_FILE = path.join(BRIDGE_DIR, "autopilot.lock");
+
+function isAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM"; // exists, owned by someone else
+  }
+}
+
+/** Take the lock (released on exit). Returns the pid of another running autopilot instead, when there is one. */
+function acquireLock() {
+  mkdirSync(BRIDGE_DIR, { recursive: true });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      writeFileSync(LOCK_FILE, String(process.pid), { flag: "wx" });
+      process.once("exit", () => {
+        try {
+          if (readFileSync(LOCK_FILE, "utf8").trim() === String(process.pid)) rmSync(LOCK_FILE, { force: true });
+        } catch {
+          // already gone
+        }
+      });
+      return null;
+    } catch (error) {
+      if (error.code !== "EEXIST") return null; // the folder cannot hold a lock: run without one
+    }
+    let holder = 0;
+    try {
+      holder = Number(readFileSync(LOCK_FILE, "utf8").trim());
+    } catch {
+      continue; // removed in the meantime
+    }
+    if (holder !== process.pid && isAlive(holder)) return holder;
+    rmSync(LOCK_FILE, { force: true }); // left by an autopilot that was killed
+  }
+  return null;
+}
+
 /** The Claude Code executable: MOTION_STUDIO_CLAUDE_BIN, `claude` on PATH, or the native installer's location. */
 function claudeCommand() {
   if (process.env.MOTION_STUDIO_CLAUDE_BIN) return process.env.MOTION_STUDIO_CLAUDE_BIN;
-  const probe = spawnSync(process.platform === "win32" ? "where" : "which", ["claude"], { encoding: "utf8" });
+  const probe = spawnSync(process.platform === "win32" ? "where" : "which", ["claude"], { encoding: "utf8", windowsHide: true });
   const onPath = probe.status === 0 ? probe.stdout.split(/\r?\n/).find((line) => line.trim()) : undefined;
   if (onPath) return onPath.trim();
   const native = path.join(os.homedir(), ".local", "bin", process.platform === "win32" ? "claude.exe" : "claude");
@@ -112,6 +217,13 @@ function checkLogin(bin) {
   }
 }
 
+/** Whether this Claude Code knows `--effort` (older versions refuse unknown flags). */
+function knowsEffortFlag(bin) {
+  const [command, args] = commandLine(bin, ["--help"]);
+  const result = spawnSync(command, args, { encoding: "utf8", env: childEnv(), windowsHide: true, timeout: 30_000 });
+  return /--effort\b/.test(`${result.stdout ?? ""}${result.stderr ?? ""}`);
+}
+
 /** The final "result" event of Claude Code's output: one JSON object, or the last result line of a stream. */
 function readResult(stdout, streaming) {
   if (!streaming) return JSON.parse(stdout);
@@ -132,10 +244,12 @@ function readResult(stdout, streaming) {
 /**
  * One `claude -p` run. Resolves with the model's text; rejects with a readable message. With
  * `images` (base64 JPEGs: a storyboard's reference previews) the prompt goes in as one stream-json
- * user message holding the text and the images.
+ * user message holding the text and the images. `kind` picks the effort and the time limit.
  */
-function runClaude(bin, prompt, model, images = []) {
+function runClaude(bin, prompt, { model, kind = "normal", images = [] }) {
   const streaming = images.length > 0;
+  const effort = effortFor(kind);
+  const timeoutMs = RUN_TIMEOUT_MS[kind] ?? RUN_TIMEOUT_MS.normal;
   // No tools, no MCP servers, no settings/hooks/CLAUDE.md, no saved session: a request can only produce text.
   const args = [
     "-p",
@@ -152,14 +266,16 @@ function runClaude(bin, prompt, model, images = []) {
     "--no-session-persistence",
   ];
   if (model) args.push("--model", model);
+  if (effort) args.push("--effort", effort);
+  say(`  Claude Code: ${model ?? "default model"}, effort ${effort ?? "default"}`);
   return new Promise((resolve, reject) => {
     const child = spawnClaude(bin, args, { cwd: WORK_DIR, env: childEnv(), stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
       child.kill();
-      reject(new Error(`Claude Code did not finish within ${RUN_TIMEOUT_MS / 60_000} minutes`));
-    }, RUN_TIMEOUT_MS);
+      reject(new Error(`Claude Code did not finish within ${timeoutMs / 60_000} minutes`));
+    }, timeoutMs);
     child.stdout.setEncoding("utf8").on("data", (chunk) => (stdout += chunk));
     child.stderr.setEncoding("utf8").on("data", (chunk) => (stderr += chunk));
     child.on("error", (error) => {
@@ -305,7 +421,7 @@ async function polishBuiltVideo(bin, model, built) {
     "```",
   ].join("\n");
   try {
-    const run = await runClaude(bin, prompt, model);
+    const run = await runClaude(bin, prompt, { model, kind: "deep" });
     const reply = parseReply(run.text);
     if ("error" in reply) return;
     await push({ type: "edit", summary: reply.summary, code: reply.code, prompt: "Quality check fixes", ...(reply.files ? { files: reply.files } : {}) });
@@ -337,7 +453,7 @@ async function handleBoardStep(bin, request, model) {
   for (let attempt = 1; attempt <= 2; attempt++) {
     let text;
     try {
-      const run = await runClaude(bin, prompt, model, images);
+      const run = await runClaude(bin, prompt, { model, kind: "deep", images });
       text = run.text;
       say(`  Claude answered in ${run.seconds}s`);
     } catch (error) {
@@ -377,16 +493,20 @@ async function handleBoardStep(bin, request, model) {
 
 async function handle(bin, request, model) {
   if (request.kind === "board") {
-    await handleBoardStep(bin, request, model);
+    await working(`Storyboard step for "${request.board.title}"`, () => handleBoardStep(bin, request, model));
     return;
   }
+  await working(`Request: ${String(request.prompt ?? "").replace(/\s+/g, " ").slice(0, 80)}`, () => handleEdit(bin, request, model));
+}
+
+async function handleEdit(bin, request, model) {
   const where = request.layerId ? ` · layer "${request.layerName ?? request.layerId}"` : "";
   say(`Request ${request.id} (${request.scope}${where}): ${request.prompt}`);
   let prompt = request.brief;
   for (let attempt = 1; attempt <= 2; attempt++) {
     let text;
     try {
-      const run = await runClaude(bin, prompt, model);
+      const run = await runClaude(bin, prompt, { model, kind: "normal" });
       text = run.text;
       say(`  Claude answered in ${run.seconds}s`);
     } catch (error) {
@@ -422,21 +542,40 @@ async function handle(bin, request, model) {
   }
 }
 
+/** True once the server has been unreachable for SERVER_GONE_MS, for an autopilot the server started. */
+function serverGone(since) {
+  return MANAGED && since !== null && Date.now() - since > SERVER_GONE_MS;
+}
+
 async function main() {
   const flags = parseFlags(process.argv.slice(2));
-  const model = flags.model ?? process.env.MOTION_STUDIO_AUTOPILOT_MODEL;
+  const model = flags.model ?? process.env.MOTION_STUDIO_AUTOPILOT_MODEL ?? DEFAULT_MODEL;
+  // Before anything is reported: a second autopilot must leave the running one's state alone.
+  const other = acquireLock();
+  if (other) {
+    console.log(`Another autopilot is already running (process ${other}); this one exits.`);
+    return;
+  }
+  stateBase.model = model;
+  process.once("exit", () => report(exitState.state, exitState.message));
+  report("starting");
+  setInterval(() => report(current.state, current.message), KEEPALIVE_MS).unref();
   const bin = claudeCommand();
   console.log("WeDo Claude Motion autopilot  ·  اتوپایلوت");
   const found = await resolveBase();
   console.log(`  editor:  ${BASE}${found ? "" : "  (not running yet; waiting for it)"}`);
-  console.log(`  claude:  ${bin}${model ? `  (model ${model})` : ""}`);
 
   const login = checkLogin(bin);
   if (!login.ok) {
     console.log(`\n  ${login.reason}. Sign in once with:  claude auth login\n`);
+    exitState = { state: "signed-out", message: login.reason };
     process.exitCode = 2;
     return;
   }
+  effortSupported = knowsEffortFlag(bin);
+  stateBase.effort = { deep: effortFor("deep") ?? null, normal: effortFor("normal") ?? null };
+  console.log(`  claude:  ${bin}  (model ${model}; effort ${effortFor("deep") ?? "default"} for storyboards and builds, ${effortFor("normal") ?? "default"} for edits)`);
+  if (!effortSupported) console.log("  This Claude Code has no --effort option; update it (claude update) for the deeper storyboards and builds.");
 
   WORK_DIR = await mkdtemp(path.join(os.tmpdir(), "wedo-autopilot-"));
   CONTRACT_FILE = path.join(WORK_DIR, "system-prompt.md");
@@ -449,27 +588,42 @@ async function main() {
   };
   process.once("exit", cleanup);
   for (const signal of ["SIGINT", "SIGTERM", "SIGBREAK"]) process.once(signal, () => process.exit(130));
-  let warned = false;
+  let unreachableSince = null;
   for (;;) {
     try {
       await writeFile(CONTRACT_FILE, await getContract(), "utf8");
       break;
     } catch (error) {
       if (!(error instanceof BridgeError)) throw error;
-      if (!warned) say(`${error.message} Waiting…`);
-      warned = true;
+      if (unreachableSince === null) {
+        say(`${error.message} Waiting…`);
+        report("waiting-for-server", error.message);
+        unreachableSince = Date.now();
+      }
+      if (serverGone(unreachableSince)) {
+        say("The editor's server did not come up; stopping.");
+        return;
+      }
       await sleep(3000);
     }
   }
-  say("Listening. Waiting costs no Claude usage; each request is one short Claude Code run. Ctrl+C stops.");
+  report("listening");
+  say(`Listening. Waiting costs no Claude usage; each request is one Claude Code run. ${MANAGED ? "Stop it in the editor's top bar." : "Ctrl+C stops."}`);
 
+  unreachableSince = null;
   for (;;) {
     let request;
     try {
       request = await claim({ client: "headless" });
+      unreachableSince = null;
     } catch (error) {
       if (!(error instanceof BridgeError)) throw error;
       if (error.status === 0) {
+        unreachableSince ??= Date.now();
+        if (serverGone(unreachableSince)) {
+          say("The editor's server has been gone for 10 minutes; stopping.");
+          return;
+        }
         await sleep(3000);
         continue;
       }
@@ -488,5 +642,6 @@ async function main() {
 
 main().catch((error) => {
   console.error(error);
+  exitState = { state: "error", message: error instanceof Error ? error.message : String(error) };
   process.exitCode = 1;
 });

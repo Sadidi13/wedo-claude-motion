@@ -2,7 +2,8 @@
 /**
  * Top bar: product mark, editable project name, Import / Export / Save
  * (project .zip), Undo / Redo, stage readout, the preview-error pill (click
- * to expand the message + stack) and transient notices from the store.
+ * to expand the message + stack), transient notices from the store and the
+ * autopilot switch.
  */
 import { Download, Film, FolderOpen, History, LayoutGrid, Redo2, Save, ShieldCheck, TriangleAlert, Undo2, X } from "lucide-react";
 import { useEffect, useState, type KeyboardEvent } from "react";
@@ -11,6 +12,7 @@ import { DISCLAIMER, PRODUCT_NAME } from "@/lib/brand";
 import { exportProjectZip } from "@/lib/importer";
 import { useBoardStore } from "@/store/boardStore";
 import { errorMessage, useEditorStore } from "@/store/editorStore";
+import { AutopilotChip } from "./AutopilotChip";
 import { Button } from "./ui/Button";
 import { cx } from "./ui/cx";
 import { downloadBlob } from "./ui/download";
@@ -205,6 +207,8 @@ export function TopBar({ onImport, onExport, onCheck, onHistory }: TopBarProps) 
           <span>{meta.fps} fps</span>
         </div>
       )}
+
+      <AutopilotChip />
 
       {showError && errorText && (
         <div className="absolute right-3 top-full z-40 mt-1 w-[520px] max-w-[80vw] rounded-md border border-danger/40 bg-panel-2 p-3 shadow-2xl">

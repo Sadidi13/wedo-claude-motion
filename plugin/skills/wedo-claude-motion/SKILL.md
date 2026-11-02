@@ -1,6 +1,6 @@
 ---
 name: wedo-claude-motion
-description: Make and edit videos in WeDo Claude Motion, a layer-based animation editor on this computer (localhost:3000), from any folder. Use whenever the user asks for a video, animation, motion graphic, promo, teaser, intro, title card or reel (build it as a layered WeDo Claude Motion scene, storyboard first, not as a rendered file), for "check Claude Motion" / «کلاد موشن رو چک کن», for "listen to Motion Studio", and when a `wedo.mjs wait` background task finishes. Installs the app first if it is missing.
+description: Make and edit videos in WeDo Claude Motion, a layer-based animation editor on this computer (localhost:3000), from any folder. Use whenever the user asks for a video, animation, motion graphic, promo, teaser, intro, title card or reel (build it as a layered WeDo Claude Motion scene, storyboard first, not as a rendered file), for "open Claude Motion" / «کلاد موشن رو باز کن», for "check Claude Motion" / «کلاد موشن رو چک کن», for "listen to Motion Studio", and when a `wedo.mjs wait` background task finishes. Installs the app first if it is missing.
 ---
 
 # WeDo Claude Motion
@@ -24,6 +24,12 @@ commands' output are inside the app.
    https://github.com/Sadidi13/wedo-claude-motion/blob/main/INSTALL.md, then continue.
 2. `status`. When the server is not reachable, `start` starts it in the background and opens the
    editor (the first start can take a minute).
+3. "Open Claude Motion" / «کلاد موشن رو باز کن» without a particular video: `launch`. It starts the
+   server when needed, turns the background autopilot on and opens the editor; from then on the whole
+   video (storyboard, build, edits, export) happens in the editor and the autopilot answers each step
+   (Claude Opus 5.5; effort xhigh for storyboards and builds, high for edits). Waiting costs nothing.
+   Tell the user that in their language and stop; do not also run `wait`. `autopilot status|start|stop`
+   reports or switches it, like the "Autopilot" button in the editor's top bar.
 
 ## 1. A new video: storyboard first
 

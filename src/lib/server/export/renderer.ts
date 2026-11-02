@@ -310,7 +310,7 @@ async function renderRange(
  * render page asks at once; afterwards each frame is a plain file read. Failures are left to the
  * pages to report.
  */
-async function warmMediaRoutes(origin: string, mediaIds: readonly string[]): Promise<void> {
+export async function warmMediaRoutes(origin: string, mediaIds: readonly string[]): Promise<void> {
   for (const id of mediaIds) {
     for (const route of [`/api/media/${id}`, `/api/media/${id}/frames/0`]) {
       await fetch(new URL(route, origin), { signal: AbortSignal.timeout(READY_TIMEOUT_MS) })

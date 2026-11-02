@@ -52,6 +52,7 @@ export {
   completeRequest,
   pushEdit,
   pushNewScene,
+  releaseClaims,
   type BridgePush,
   type PushResult,
 } from "./operations";

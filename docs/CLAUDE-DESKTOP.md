@@ -74,7 +74,7 @@ bridge like `wait` does, which talks only to the local server and costs no Claud
 arrives it runs Claude Code once in print mode with the user's own Claude login:
 
 ```bash
-claude -p --output-format json --system-prompt-file <authoring guide> --tools "" --strict-mcp-config --setting-sources "" --no-session-persistence
+claude -p --output-format json --system-prompt-file <authoring guide> --tools "" --strict-mcp-config --setting-sources "" --no-session-persistence --model claude-opus-5-5 --effort xhigh
 ```
 
 The brief (`?client=headless`) asks for a bare JSON object; the reply goes through the same validation,
@@ -84,10 +84,36 @@ environment variables, in a private temporary folder deleted on exit, so a reque
 produce scene code. Each request is a short, independent run: no conversation
 grows over time.
 
-- **Windows:** double-click `scripts/start-autopilot.cmd`. It starts Motion Studio in its own window if
-  needed, runs the autopilot, and the first time opens Claude Code's sign-in
+Every run uses Claude Opus 5.5. Storyboard steps, the build and its quality pass run at effort
+`xhigh`, edits at `high` (`MOTION_STUDIO_AUTOPILOT_MODEL`, `MOTION_STUDIO_AUTOPILOT_EFFORT_DEEP` and
+`MOTION_STUDIO_AUTOPILOT_EFFORT` change them; a Claude Code without `--effort` runs at its default).
+
+### One window: the editor runs the autopilot
+
+The server starts and stops the autopilot itself (`src/lib/server/bridge/autopilot.ts`), as a
+background process without a window: `GET /api/bridge/autopilot` (`?log=<n>` adds the last lines of
+its log), `POST { "action": "start" | "stop" | "sign-in" }`. The editor's top bar shows it
+(**Autopilot on / off / working / signed out**); its panel starts and stops it, shows the model, the
+efforts and the log, and opens Claude Code's sign-in when it is signed out.
+
+- `node scripts/motion-bridge.mjs launch` ("open Claude Motion" in a Claude Code chat) starts the
+  server when needed, turns the autopilot on unless a Claude chat already listens, and opens the
+  editor. `scripts/start.cmd` (the desktop shortcut) does the same.
+- `node scripts/motion-bridge.mjs autopilot [status|start|stop|sign-in]` does what the top bar does.
+- The autopilot writes what it is doing to `<bridge>/autopilot.json` (starting, waiting for the server,
+  listening, working with a heartbeat every 5 s, signed out, stopped) and logs to
+  `<bridge>/autopilot.log`. While it works on a long run the editor shows it busy, not offline.
+- One autopilot at a time: a second one exits at once (`<bridge>/autopilot.lock`).
+- **Stop** ends the Claude Code run in progress too, and declines what the autopilot had claimed so
+  the editor shows the reason instead of waiting.
+- One the server started stops by itself when the server has been gone for 10 minutes.
+
+### Without the editor's switch
+
+- **Windows:** double-click `scripts/start-autopilot.cmd` for the autopilot in a console window. It
+  starts Motion Studio in its own window if needed, and the first time opens Claude Code's sign-in
   (`claude auth login --claudeai`) in the browser.
-- **Anywhere:** `pnpm autopilot` (`--model sonnet` or `MOTION_STUDIO_AUTOPILOT_MODEL` to pick a model,
+- **Anywhere:** `pnpm autopilot` (`--model <id>` or `MOTION_STUDIO_AUTOPILOT_MODEL` to pick a model,
   `MOTION_STUDIO_CLAUDE_BIN` for a Claude Code binary that is not on PATH). Exit code 2 means Claude Code
   is not signed in.
 

@@ -94,7 +94,7 @@ function waitingText(status: BridgeStatus | null, recentlyActive: boolean): stri
   if (status?.listener === "listening") return `Sent to ${who}…`;
   if (status?.listener === "busy") return `${who} is working on it…`;
   if (recentlyActive) return `Queued. ${who} will pick it up as soon as it finishes the previous request.`;
-  return "Queued. Nobody is listening yet: start the autopilot (scripts/start-autopilot.cmd), or say “check Claude Motion” in the Claude chat.";
+  return "Queued. Nobody is listening yet: turn the Autopilot on in the top bar, or say “check Claude Motion” in a Claude chat.";
 }
 
 export function AskClaudeTab() {

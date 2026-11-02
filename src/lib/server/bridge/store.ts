@@ -69,6 +69,8 @@ export interface BridgeRequestRecord {
   state: BridgeRequestState;
   createdAt: string;
   claimedAt?: string;
+  /** who claimed it: the autopilot's claims are declined when the editor stops it */
+  claimedBy?: BridgeClient;
   finishedAt?: string;
   request: AiEditRequest;
   /** set for storyboard steps; they are finished by the board update Claude sends, not by an answer */
@@ -250,12 +252,22 @@ export function claimNextRequest(now = new Date(), client: BridgeClient = "cli")
     for (const id of await listIds(requestsDir())) {
       const record = await readJson<BridgeRequestRecord>(requestFile(id));
       if (record?.state !== "pending") continue;
-      const claimed: BridgeRequestRecord = { ...record, state: "claimed", claimedAt: now.toISOString() };
+      const claimed: BridgeRequestRecord = { ...record, state: "claimed", claimedAt: now.toISOString(), claimedBy: client };
       await writeJsonAtomic(requestFile(id), claimed);
       return claimed;
     }
     return null;
   });
+}
+
+/** Requests a client claimed and has not finished. */
+export async function claimedRequests(client: BridgeClient): Promise<BridgeRequestRecord[]> {
+  const records: BridgeRequestRecord[] = [];
+  for (const id of await listIds(requestsDir())) {
+    const record = await readJson<BridgeRequestRecord>(requestFile(id));
+    if (record?.state === "claimed" && record.claimedBy === client) records.push(record);
+  }
+  return records;
 }
 
 export class BridgeStateError extends Error {

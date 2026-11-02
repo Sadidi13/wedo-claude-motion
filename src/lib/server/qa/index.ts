@@ -17,10 +17,13 @@ import {
   chromiumSandboxEnabled,
   isAllowedRenderRequest,
   previewUrl,
+  projectMediaIds,
   projectUsesWebGL,
   resolveChromiumPath,
+  warmMediaRoutes,
 } from "../export/renderer";
 import { ExportRequestError } from "../export/schema";
+import { ensureMediaReady } from "../media/ingest";
 import { type FrameSample, type QaReport, type TextSample, buildIssues } from "./analyze";
 
 export { formatReport, type QaIssue, type QaReport } from "./analyze";
@@ -205,6 +208,10 @@ export async function runQualityCheck(project: Project, origin: string): Promise
     const meta = project.meta;
     const { times, step } = sampleTimes(meta.duration);
     const url = previewUrl(origin, jobId, false);
+    // Library videos are checked as they will export: their frames must exist and may load.
+    const mediaIds = projectMediaIds(project);
+    await ensureMediaReady(mediaIds);
+    await warmMediaRoutes(origin, mediaIds);
     const browser = await chromium.launch({
       executablePath: resolveChromiumPath(),
       args: chromiumLaunchArgs(projectUsesWebGL(project)),
@@ -213,7 +220,9 @@ export async function runQualityCheck(project: Project, origin: string): Promise
     try {
       const context = await browser.newContext({ viewport: { width: meta.width, height: meta.height }, deviceScaleFactor: SAMPLE_SCALE });
       const id = jobId;
-      await context.route("**/*", (route) => (isAllowedRenderRequest(route.request().url(), url, id) ? route.continue() : route.abort("blockedbyclient")));
+      await context.route("**/*", (route) =>
+        isAllowedRenderRequest(route.request().url(), url, id, mediaIds) ? route.continue() : route.abort("blockedbyclient"),
+      );
       const page = await context.newPage();
       await page.goto(url, { waitUntil: "load", timeout: READY_TIMEOUT_MS });
       await page.waitForFunction(() => {

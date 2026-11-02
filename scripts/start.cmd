@@ -1,5 +1,6 @@
 @echo off
-rem Starts WeDo Claude Motion and opens it in your browser (double-click, or the desktop shortcut).
+rem Starts WeDo Claude Motion with its autopilot and opens it in your browser (double-click, or the
+rem desktop shortcut). The autopilot runs in the background; switch it off in the editor's top bar.
 rem The server runs in a minimised window called "WeDo Claude Motion server"; close it to stop.
 setlocal
 title WeDo Claude Motion
@@ -17,7 +18,7 @@ if errorlevel 1 (
   start "WeDo Claude Motion server - close this window to stop" /min cmd /k pnpm dev
 )
 
-call node scripts\motion-bridge.mjs open --wait 180
+call node scripts\motion-bridge.mjs launch --wait 180 --no-start
 if errorlevel 1 goto failed
 exit /b 0
 

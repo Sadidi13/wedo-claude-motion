@@ -28,7 +28,7 @@ import type {
   ProjectFile,
 } from "@/lib/types";
 import { boardForBuild, markBoardBuilt, recordBoardDecline } from "./boards";
-import { BridgeStateError, type BridgeRequestRecord, finishRequest, pushEvent, readSyncedProject } from "./store";
+import { BridgeStateError, type BridgeRequestRecord, claimedRequests, finishRequest, pushEvent, readSyncedProject } from "./store";
 
 /** Body of POST /api/bridge/requests/[id]/result. */
 export const BridgeResultSchema = z.union([AiOutputSchema, z.object({ error: z.string().trim().min(1).max(4_000) })]);
@@ -169,6 +169,23 @@ export async function completeRequest(
   // Invalid output leaves the request claimed so Claude can fix it and answer again.
   if (result.ok) await finishRequest(record.id, { result });
   return result;
+}
+
+/**
+ * Decline everything `client` claimed and did not finish (the autopilot was stopped mid-run), so the
+ * editor shows `reason` instead of waiting. Returns how many requests were declined.
+ */
+export async function releaseClaims(client: BridgeClient, reason: string): Promise<number> {
+  let released = 0;
+  for (const record of await claimedRequests(client)) {
+    try {
+      await completeRequest(record, { error: reason });
+      released++;
+    } catch {
+      // finished or cancelled in the meantime
+    }
+  }
+  return released;
 }
 
 function projectFromScene(name: string, response: AiEditResponse): Project {

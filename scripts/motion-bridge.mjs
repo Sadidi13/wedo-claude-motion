@@ -5,6 +5,12 @@
  * MCP connector in scripts/motion-studio-mcp.mjs instead (`install-chat` sets it up).
  * Design: docs/CLAUDE-DESKTOP.md. No dependencies.
  *
+ *   launch [--wait <s>] [--no-autopilot] [--no-open] [--no-start]
+ *                                  "open Claude Motion": server + background autopilot + the editor
+ *                                  with the New video wizard, so everything happens in the browser
+ *                                  (--no-start: only wait for a server something else starts)
+ *   autopilot [status|start|stop|sign-in]
+ *                                  the background autopilot the server manages
  *   start [--no-open] [--wait <s>] start the editor's server if needed and open the editor
  *   open [--wait <s>]              open the editor in the browser (waiting for a starting server)
  *   status                         is the server up, is anyone listening, what is open
@@ -55,6 +61,7 @@ import {
   REPO,
   SCRATCH,
   answer,
+  autopilot,
   checkQuality,
   claim,
   decline,
@@ -81,7 +88,7 @@ import {
 class CliError extends Error {}
 
 /** Flags that take no value. */
-const BOOLEAN_FLAGS = new Set(["force", "no-open", "skip-storyboard"]);
+const BOOLEAN_FLAGS = new Set(["force", "no-open", "no-autopilot", "no-start", "skip-storyboard"]);
 
 function parseArgs(argv) {
   const positional = [];
@@ -640,6 +647,44 @@ async function cmdOpen(flags) {
 }
 
 /**
+ * `launch`: everything for working in the editor alone ("open Claude Motion"). Starts the server
+ * when needed, starts the background autopilot unless someone else already listens, and opens the
+ * editor with the "New video" wizard (--wait <seconds>: how long to wait for a starting server;
+ * --no-autopilot / --no-open skip those steps; --no-start waits for a server scripts/start.cmd starts).
+ */
+async function cmdLaunch(flags) {
+  await recordLocation();
+  const { started } = await ensureServer({ timeoutSeconds: Number(flags.wait ?? 180), start: !flags["no-start"] });
+  console.log(started ? `Started WeDo Claude Motion at ${BASE}.` : `WeDo Claude Motion is running at ${BASE}.`);
+  if (!flags["no-autopilot"]) {
+    const status = await getStatus();
+    if (status.listener === "listening" && status.listenerClient !== "headless") {
+      console.log("A Claude session is already listening to the editor, so the autopilot was not started (one listener at a time).");
+    } else {
+      const pilot = await autopilot("start");
+      console.log(
+        pilot.running
+          ? `Autopilot: ${pilot.state}${pilot.model ? ` (${pilot.model})` : ""}. The editor's top bar shows it and switches it off.`
+          : `Autopilot did not start: ${pilot.message ?? pilot.state}`,
+      );
+    }
+  }
+  if (!flags["no-open"]) {
+    openInBrowser(editorUrl(undefined, { lead: true, newVideo: true }));
+    console.log("Opened the editor with the New video wizard.");
+  }
+}
+
+/** `autopilot [status|start|stop|sign-in]`: the background autopilot the server manages. */
+async function cmdAutopilot(positional) {
+  const action = positional[0] ?? "status";
+  if (!["status", "start", "stop", "sign-in"].includes(action)) throw new CliError("autopilot [status|start|stop|sign-in]");
+  const result = await autopilot(action);
+  if (action === "sign-in") console.log(result.message);
+  else console.log(`Autopilot: ${result.running ? "running" : "not running"} · ${result.state}${result.message ? ` · ${result.message}` : ""}${result.model ? ` · ${result.model}` : ""}`);
+}
+
+/**
  * `media <video file>`: import footage into the media library (streamed, any size) and print the
  * `media/<id>.<ext>` reference scene code uses in <Video src>. Waits until its frames are ready.
  * `media` alone lists the library.
@@ -681,6 +726,8 @@ async function cmdMedia(positional) {
 }
 
 const COMMANDS = {
+  launch: (_positional, flags) => cmdLaunch(flags),
+  autopilot: (positional) => cmdAutopilot(positional),
   start: (_positional, flags) => cmdStart(flags),
   media: (positional) => cmdMedia(positional),
   open: (_positional, flags) => cmdOpen(flags),

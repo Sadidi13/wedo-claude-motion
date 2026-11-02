@@ -15,6 +15,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, openSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -378,44 +379,91 @@ export async function tryStatus() {
   }
 }
 
+/** True when something accepts connections on 127.0.0.1:<port> (`pnpm dev` binds there). */
+function portTaken(port) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ port, host: "127.0.0.1" });
+    const done = (taken) => {
+      socket.destroy();
+      resolve(taken);
+    };
+    socket.setTimeout(1000, () => done(false));
+    socket.once("connect", () => done(true));
+    socket.once("error", () => done(false));
+  });
+}
+
+/** How long a taken port gets to turn into our server (still compiling) before a server is started anyway. */
+const STARTING_GRACE_MS = 45_000;
+
 /**
  * Make sure the editor's server runs: when it does not answer, start `pnpm dev` in the
  * repository as its own detached process (log: .motion-bridge/dev-server.log) and wait for it.
+ * A server that is still starting is waited for first, never doubled; `start: false` only waits
+ * (the desktop shortcut starts the server in its own window).
  */
-export async function ensureServer({ timeoutSeconds = 90 } = {}) {
+export async function ensureServer({ timeoutSeconds = 90, start = true } = {}) {
   let status = await tryStatus();
   if (status) return { status, started: false };
-  mkdirSync(SCRATCH, { recursive: true });
-  const log = openSync(path.join(SCRATCH, "dev-server.log"), "a");
-  const [command, args] = process.platform === "win32" ? ["cmd.exe", ["/d", "/s", "/c", "pnpm dev"]] : ["pnpm", ["dev"]];
-  spawn(command, args, { cwd: REPO, detached: true, stdio: ["ignore", log, log], windowsHide: true }).unref();
   const deadline = Date.now() + timeoutSeconds * 1000;
+  if (start && (await portTaken(Number(new URL(BASE).port) || DEFAULT_PORT))) {
+    const grace = Math.min(deadline, Date.now() + STARTING_GRACE_MS);
+    while (Date.now() < grace) {
+      await sleep(1500);
+      status = await tryStatus();
+      if (status) return { status, started: false };
+    }
+  }
+  if (start) {
+    mkdirSync(SCRATCH, { recursive: true });
+    const log = openSync(path.join(SCRATCH, "dev-server.log"), "a");
+    const [command, args] = process.platform === "win32" ? ["cmd.exe", ["/d", "/s", "/c", "pnpm dev"]] : ["pnpm", ["dev"]];
+    spawn(command, args, { cwd: REPO, detached: true, stdio: ["ignore", log, log], windowsHide: true }).unref();
+  }
   while (Date.now() < deadline) {
     await sleep(1500);
     status = await tryStatus();
-    if (status) return { status, started: true };
+    if (status) return { status, started: start };
   }
   throw new BridgeError(
-    `Started "pnpm dev" in ${REPO}, but it did not answer within ${timeoutSeconds} s. See ${path.join(SCRATCH, "dev-server.log")}.`,
+    start
+      ? `Started "pnpm dev" in ${REPO}, but it did not answer within ${timeoutSeconds} s. See ${path.join(SCRATCH, "dev-server.log")}.`
+      : `WeDo Claude Motion did not answer within ${timeoutSeconds} s. Its server window shows the reason.`,
   );
 }
 
-/** The editor's URL; with an event id the freshly opened tab applies that scene or edit. */
-export function editorUrl(eventId, { lead = false } = {}) {
+/**
+ * The editor's URL; with an event id the freshly opened tab applies that scene or edit. `lead`
+ * makes the tab the one Claude works with; `newVideo` opens the "New video" wizard in it.
+ */
+export function editorUrl(eventId, { lead = false, newVideo = false } = {}) {
   if (eventId && EVENT_ID.test(eventId)) return `${BASE}/?event=${eventId}`;
-  return lead ? `${BASE}/?lead=1` : `${BASE}/`;
+  const params = [lead ? "lead=1" : "", newVideo ? "new=1" : ""].filter(Boolean).join("&");
+  return params ? `${BASE}/?${params}` : `${BASE}/`;
 }
 
 /** Open a URL built by editorUrl() in the default browser (never a URL taken from user text). */
 export function openInBrowser(url) {
-  if (!url.startsWith(`${BASE}/`)) throw new BridgeError(`Refusing to open ${url}`);
-  const [command, args] =
-    process.platform === "win32"
-      ? ["cmd.exe", ["/d", "/c", "start", "", url]]
-      : process.platform === "darwin"
-        ? ["open", [url]]
-        : ["xdg-open", [url]];
-  spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true }).unref();
+  if (!url.startsWith(`${BASE}/`) || /["\s^%]/.test(url)) throw new BridgeError(`Refusing to open ${url}`);
+  if (process.platform === "win32") {
+    // Quoted for cmd.exe: an unquoted "&" between query parameters would end the start command.
+    spawn(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", `start "" "${url}"`], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+      windowsVerbatimArguments: true,
+    }).unref();
+    return;
+  }
+  spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], { detached: true, stdio: "ignore" }).unref();
+}
+
+/** The background autopilot the server manages: `action` is "status", "start", "stop" or "sign-in". */
+export async function autopilot(action = "status") {
+  const result =
+    action === "status" ? await request("GET", "/api/bridge/autopilot") : await request("POST", "/api/bridge/autopilot", { body: { action } });
+  if (result.status !== 200) throw failure(result, `autopilot ${action}`);
+  return result.json;
 }
 
 /**

@@ -274,6 +274,22 @@ export type BridgeListenerState = "listening" | "busy" | "offline";
 /** What answers editor requests: a Code session's CLI, the chat's MCP connector, or the autopilot. */
 export type BridgeClient = "cli" | "mcp" | "headless";
 
+/** What the autopilot is doing (src/lib/server/bridge/autopilot.ts). */
+export type AutopilotState = "stopped" | "starting" | "waiting-for-server" | "listening" | "working" | "signed-out" | "error";
+
+export interface AutopilotInfo {
+  /** its process runs */
+  running: boolean;
+  state: AutopilotState;
+  /** why it stopped (signed out, an error), or what it is working on */
+  message: string | null;
+  /** the Claude model it runs with */
+  model: string | null;
+  /** the effort of storyboard steps and builds (deep) and of edits (normal); null: the CLI default */
+  effort: { deep: string | null; normal: string | null } | null;
+  startedAt: string | null;
+}
+
 export interface BridgeStatus {
   listener: BridgeListenerState;
   /** epoch ms of the last poll from the listener, or null when it never polled */
@@ -288,6 +304,8 @@ export interface BridgeStatus {
   pending: number;
   /** the project the editor last shared with the server */
   project: { id: string; name: string; syncedAt: string } | null;
+  /** the background autopilot the server manages (absent from servers older than it) */
+  autopilot?: AutopilotInfo;
 }
 
 export type BridgeRequestState = "pending" | "claimed" | "done" | "error" | "cancelled";
