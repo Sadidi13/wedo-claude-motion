@@ -6,6 +6,7 @@
  * as a version (store/versions.ts) labelled with Claude's summary.
  */
 import { createBlankProject } from "@/lib/importer";
+import { setTableValues } from "@/lib/parser";
 import type { AiEditResponse, AiErrorResponse, AiScope, Project, ProjectFile } from "@/lib/types";
 import { errorMessage, useEditorStore } from "./editorStore";
 import { saveVersion } from "./versions";
@@ -21,13 +22,14 @@ export function applyResponse(response: AiEditResponse, scope: AiScope, layerId:
   const extraFiles = response.files ?? [];
   if (scope === "layer") {
     if (!layerId || !response.layerCode) throw new Error("The reply did not contain layer code");
-    store.replaceLayer(layerId, response.layerCode);
+    store.replaceLayer(layerId, response.layerCode, response.texts);
     for (const file of extraFiles) store.updateFile(file.path, file.content);
     return;
   }
   if (!response.sceneCode) throw new Error("The reply did not contain scene code");
   if (scope === "scene") {
-    store.setSource(response.sceneCode);
+    const texts = (response.texts ?? []).map(({ key, value }) => ({ table: "TEXT" as const, key, value }));
+    store.setSource(texts.length ? setTableValues(response.sceneCode, texts).source : response.sceneCode);
     for (const file of extraFiles) store.updateFile(file.path, file.content);
     return;
   }

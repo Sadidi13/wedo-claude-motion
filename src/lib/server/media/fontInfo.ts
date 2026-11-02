@@ -14,6 +14,8 @@ export interface FontInfo {
   /** usWeightClass, 100-900 */
   weight: number;
   style: "normal" | "italic";
+  /** the OS/2 table says it covers Arabic script (Persian text) */
+  arabic: boolean;
 }
 
 type Tables = Map<string, Uint8Array>;
@@ -186,11 +188,51 @@ export function readFontInfo(bytes: Uint8Array): FontInfo | null {
   const os2 = tables.get("OS/2");
   let weight = /bold/i.test(subfamily) ? 700 : 400;
   let italic = /italic|oblique/i.test(subfamily);
+  let arabic = false;
   if (os2 && os2.length >= 64) {
     const data = view(os2);
     const declared = data.getUint16(4);
     if (declared >= 1 && declared <= 1000) weight = declared;
     italic = italic || (data.getUint16(62) & 1) === 1;
+    arabic = (data.getUint32(42) & (1 << 13)) !== 0; // ulUnicodeRange1 bit 13: Arabic
   }
-  return { family: family.slice(0, 80), subfamily: subfamily.slice(0, 80), weight, style: italic ? "italic" : "normal" };
+  return { family: family.slice(0, 80), subfamily: subfamily.slice(0, 80), weight, style: italic ? "italic" : "normal", arabic };
+}
+
+/**
+ * The same, reading only the font's table directory, `name` and `OS/2` from disk (a TrueType or
+ * OpenType file; null for anything else), so a folder of hundreds of system fonts lists quickly.
+ */
+export async function readFontInfoFromFile(read: (offset: number, length: number) => Promise<Uint8Array>): Promise<FontInfo | null> {
+  const header = await read(0, 12);
+  if (header.length < 12) return null;
+  const signature = tagAt(header, 0);
+  if (signature !== "\u0000\u0001\u0000\u0000" && signature !== "OTTO" && signature !== "true") return null;
+  const count = view(header).getUint16(4);
+  if (count === 0 || count > 200) return null;
+  const directory = await read(12, count * 16);
+  const records = new Map<string, { offset: number; length: number }>();
+  for (let i = 0; i < count && (i + 1) * 16 <= directory.length; i++) {
+    const tag = tagAt(directory, i * 16);
+    if (tag === "name" || tag === "OS/2") records.set(tag, { offset: view(directory).getUint32(i * 16 + 8), length: view(directory).getUint32(i * 16 + 12) });
+  }
+  const name = records.get("name");
+  if (!name || name.length > 1_000_000) return null;
+  const tables: [string, Uint8Array][] = [["name", await read(name.offset, name.length)]];
+  const os2 = records.get("OS/2");
+  if (os2 && os2.length <= 1024) tables.push(["OS/2", await read(os2.offset, os2.length)]);
+  // A minimal sfnt holding just those tables, for readFontInfo.
+  let offset = 12 + tables.length * 16;
+  const out = new Uint8Array(offset + tables.reduce((sum, [, table]) => sum + table.length, 0));
+  const data = view(out);
+  data.setUint32(0, 0x00010000);
+  data.setUint16(4, tables.length);
+  tables.forEach(([tag, table], i) => {
+    for (let k = 0; k < 4; k++) out[12 + i * 16 + k] = tag.charCodeAt(k);
+    data.setUint32(12 + i * 16 + 8, offset);
+    data.setUint32(12 + i * 16 + 12, table.length);
+    out.set(table, offset);
+    offset += table.length;
+  });
+  return readFontInfo(out);
 }

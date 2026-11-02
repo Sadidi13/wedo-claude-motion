@@ -1,18 +1,19 @@
 "use client";
 /**
- * Right-hand inspector with three tabs: Properties (layer / stage fields),
- * Code (exact source of the selected layer or the whole scene) and Ask Claude.
- * All three stay mounted (hidden with CSS) so drafts and in-flight requests
- * survive a tab switch.
+ * Right-hand inspector with four tabs: Properties (layer / stage fields), Text
+ * (every word and font, edited without Claude), Code (exact source of the
+ * selected layer or the whole scene) and Ask Claude. All stay mounted (hidden
+ * with CSS) so drafts and in-flight requests survive a tab switch.
  */
-import { Braces, SlidersHorizontal, Sparkles } from "lucide-react";
+import { Braces, SlidersHorizontal, Sparkles, Type } from "lucide-react";
 import { AskClaudeTab } from "./AskClaudeTab";
 import { CodeTab } from "./CodeTab";
 import { PropertiesTab } from "./PropertiesTab";
+import { TextTab } from "./TextTab";
 import { cx } from "./ui/cx";
 import { Segmented } from "./ui/Segmented";
 
-export type InspectorTab = "properties" | "code" | "ask";
+export type InspectorTab = "properties" | "text" | "code" | "ask";
 
 interface InspectorProps {
   tab: InspectorTab;
@@ -21,7 +22,8 @@ interface InspectorProps {
 }
 
 const TABS = [
-  { value: "properties", label: <span className="inline-flex items-center gap-1"><SlidersHorizontal size={13} /> Properties</span>, title: "Layer and stage properties" },
+  { value: "properties", label: <span className="inline-flex items-center gap-1"><SlidersHorizontal size={13} /> Props</span>, title: "Layer and stage properties" },
+  { value: "text", label: <span className="inline-flex items-center gap-1"><Type size={13} /> Text</span>, title: "Every text and font in the video" },
   { value: "code", label: <span className="inline-flex items-center gap-1"><Braces size={13} /> Code</span>, title: "Edit the layer's source" },
   { value: "ask", label: <span className="inline-flex items-center gap-1"><Sparkles size={13} /> Ask Claude</span>, title: "Rewrite with Claude" },
 ] as const;
@@ -34,6 +36,9 @@ export function Inspector({ tab, onTabChange, onOpenCode }: InspectorProps) {
       </div>
       <div className={cx("ms-scroll min-h-0 flex-1 overflow-auto", tab !== "properties" && "hidden")}>
         <PropertiesTab onOpenCode={onOpenCode} />
+      </div>
+      <div className={cx("ms-scroll min-h-0 flex-1 overflow-auto", tab !== "text" && "hidden")}>
+        <TextTab />
       </div>
       <div className={cx("flex min-h-0 flex-1 flex-col", tab !== "code" && "hidden")}>
         <CodeTab />

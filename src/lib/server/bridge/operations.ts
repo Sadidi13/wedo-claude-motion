@@ -69,7 +69,7 @@ export type BriefClient = BridgeClient;
 function deliveryLines(id: string, client: BriefClient): string[] {
   if (client === "headless") {
     return [
-      'Reply with ONLY a JSON object: {"summary": "...", "code": "..."}, plus an optional "files" array of {"path", "content"}.',
+      'Reply with ONLY a JSON object: {"summary": "...", "code": "..."}, plus an optional "files" array of {"path", "content"} and an optional "texts" array of {"key", "value"} for the scene\'s TEXT table.',
       "No text before or after it and no Markdown code fences around it. `code` follows the Output format rules of the system prompt.",
       'If the instruction is not a change to this animation, reply {"error": "<short reason>"} instead.',
       "",
@@ -79,7 +79,7 @@ function deliveryLines(id: string, client: BriefClient): string[] {
     return [
       'Answer with the `answer_request` tool: `request_id` "' +
         id +
-        "\", `summary` (one short paragraph, in the instruction's language) and `code`.",
+        "\", `summary` (one short paragraph, in the instruction's language) and `code` (and `texts` when words in the TEXT table change).",
       "The rules for `code` are in the authoring guide (`get_authoring_guide`), section \"Output format\".",
       "If the instruction is not a change to this animation, use `decline_request` with a short reason instead.",
       "",

@@ -20,6 +20,7 @@ import { ATTR, attrIsTrue, attrNumber, attrString, findAttr, tagBaseName } from 
 import { lineOf, span } from "./babel";
 import { tagSlug } from "./ids";
 import { type StageContext, type WalkedElement, elementId, isAudioTag, isTimedTag, loadStage } from "./stage";
+import { textLookup, textMemberKey } from "./textTable";
 
 const NAME_MAX = 24;
 const PREVIEW_MAX = 60;
@@ -54,12 +55,13 @@ export function buildScene(ctx: StageContext): ParsedScene {
   const layers: LayerNode[] = [];
   const nodeOf = new Map<WalkedElement, LayerNode>();
   const content = new Map<LayerNode, OwnContent>();
+  const texts = textLookup(ctx.ast);
 
   for (const el of ctx.elements) {
     const parent = el.parent ? (nodeOf.get(el.parent) ?? null) : null;
     const node = buildNode(el, parent, parent?.range ?? rootRange, byId, warnings);
     nodeOf.set(el, node);
-    content.set(node, collectOwnContent(el.node));
+    content.set(node, collectOwnContent(el.node, texts));
     byId[node.id] = node;
     if (parent) parent.children.push(node);
     else layers.push(node);
@@ -246,10 +248,10 @@ interface OwnContent {
 
 /**
  * Static text directly inside an element: JSXText plus literal expression
- * containers, descending through fragments but NOT into nested elements
- * (those are layers of their own).
+ * containers and `{TEXT.key}` (the scene's text table, `texts`), descending
+ * through fragments but NOT into nested elements (those are layers of their own).
  */
-function collectOwnContent(node: t.JSXElement): OwnContent {
+function collectOwnContent(node: t.JSXElement, texts: Map<string, string>): OwnContent {
   const parts: string[] = [];
   let hasExpressions = false;
   const visit = (children: t.JSXElement["children"]): void => {
@@ -270,7 +272,12 @@ function collectOwnContent(node: t.JSXElement): OwnContent {
           else if (expr.type === "TemplateLiteral" && expr.expressions.length === 0) {
             parts.push(expr.quasis.map((q) => q.value.cooked ?? q.value.raw).join(""));
           } else if (expr.type === "JSXFragment") visit(expr.children);
-          else if (expr.type !== "JSXEmptyExpression" && expr.type !== "JSXElement") hasExpressions = true;
+          else if (expr.type !== "JSXEmptyExpression" && expr.type !== "JSXElement") {
+            const key = textMemberKey(expr);
+            const value = key === null ? undefined : texts.get(key);
+            if (value !== undefined) parts.push(value);
+            hasExpressions = true;
+          }
           break;
         }
         default:

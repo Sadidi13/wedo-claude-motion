@@ -277,7 +277,15 @@ export function setStageMeta(source: string, meta: Partial<StageMeta>): string;
 export function setLayerAttribute(source: string, id: string, name: string, value: number | string | boolean | null): string; // one JSX attribute as a literal; null removes it
 export function setLayerMotion(source: string, id: string, spec: MotionSpec | null): string;   // writes (or, null, removes) data-motion
 export function listLayerIds(source: string): string[];
+// Words and fonts (textTable.ts): the scene's `const TEXT = {…}` and `const FONTS = {…}` tables, keys dotted for nesting
+export function readSceneTables(source: string): { TEXT: TableEntry[] | null; FONTS: TableEntry[] | null };
+export function setTableValue(source: string, table: "TEXT" | "FONTS", key: string, value: string): string; // writes JSON.stringify(value)
+export function setTableValues(source: string, changes: { table; key; value }[]): { source: string; missing: string[] };
+export function readJsxTexts(source: string): JsxTextEntry[];       // plain JSX text, keyed t1, t2, … in source order
+export function setJsxText(source: string, key: string, value: string): string; // `{"…"}` when the text needs it
 ```
+
+A text layer whose child is `{TEXT.key}` takes that value for its name and preview.
 
 Layer naming rule (`LayerNode.name`): `data-layer-name` > for text elements the first 24 chars of text
 > `<Tag>`; Sprite with a single element child may borrow that child's text for the preview.

@@ -337,7 +337,8 @@ function parseReply(text) {
     throw new BridgeValidationError('The reply must have string fields "summary" and "code"');
   }
   const files = Array.isArray(json.files) ? json.files.filter((f) => typeof f?.path === "string" && typeof f?.content === "string") : undefined;
-  return { summary: json.summary, code: json.code, files: files?.length ? files : undefined };
+  const texts = Array.isArray(json.texts) ? json.texts.filter((t) => typeof t?.key === "string" && typeof t?.value === "string") : undefined;
+  return { summary: json.summary, code: json.code, files: files?.length ? files : undefined, ...(texts?.length ? { texts } : {}) };
 }
 
 /** Deliver one storyboard step from the model's JSON reply; throws BridgeValidationError when it does not fit. */

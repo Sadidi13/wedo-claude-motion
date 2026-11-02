@@ -169,17 +169,18 @@ function prepare(request: AiEditRequest): Prepared {
 /** Successful edit response from validated output (shared by the API path and the Claude Desktop bridge). */
 function successResponse(
   scope: AiScope,
-  summary: string,
+  output: Pick<AiOutput, "summary" | "texts">,
   validation: { layerCode?: string; sceneCode?: string; files?: { path: string; content: string }[] },
   usage?: Usage,
 ): AiEditResponse {
   return {
     ok: true,
     scope,
-    summary: summary.trim(),
+    summary: output.summary.trim(),
     ...(validation.layerCode !== undefined ? { layerCode: validation.layerCode } : {}),
     ...(validation.sceneCode !== undefined ? { sceneCode: validation.sceneCode } : {}),
     ...(validation.files ? { files: validation.files } : {}),
+    ...(output.texts?.length ? { texts: output.texts } : {}),
     ...(usage ? { usage } : {}),
   };
 }
@@ -200,7 +201,7 @@ export function finalizeOutput(request: AiEditRequest, output: AiOutput): AiEdit
     layerId: request.layerId,
   });
   if (!validation.ok) return fail("invalid_output", validation.error);
-  return successResponse(request.scope, output.summary, validation);
+  return successResponse(request.scope, output, validation);
 }
 
 type Extracted = { ok: true; output: AiOutput; raw: string } | { ok: false; error: string; raw: string };
@@ -305,7 +306,7 @@ export function createAiService(options: AiServiceOptions = {}): AiService {
       const extracted = extractOutput(turn.message, turn.parsed);
       const validation = extracted.ok ? validateAiOutput(extracted.output, ctx) : extracted;
       if (validation.ok && extracted.ok) {
-        return successResponse(request.scope, extracted.output.summary, validation, usage);
+        return successResponse(request.scope, extracted.output, validation, usage);
       }
       const error = validation.ok ? "unknown validation failure" : validation.error;
       if (attempt === 0) {

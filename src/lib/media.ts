@@ -74,6 +74,8 @@ export interface MediaMeta {
   fontFamily?: string;
   fontWeight?: number;
   fontStyle?: "normal" | "italic";
+  /** the font covers Arabic script (Persian text) */
+  fontArabic?: boolean;
   transcript?: TranscriptStatus;
   /** a reference's measured look (contact sheets, cuts, colours, loudness; POST /api/media/<id>/analysis) */
   analysis?: { state: "processing" | "ready" | "error"; error?: string };

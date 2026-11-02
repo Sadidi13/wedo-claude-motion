@@ -21,3 +21,14 @@ export {
 } from "./layerOps";
 export { setLayerAttribute, setLayerHidden, setLayerLocked, setLayerMotion, setLayerName, setLayerTiming, wrapInSprite } from "./layerProps";
 export { setStageMeta } from "./stageMeta";
+export {
+  type JsxTextEntry,
+  type SceneTables,
+  type TableEntry,
+  type TableName,
+  readJsxTexts,
+  readSceneTables,
+  setJsxText,
+  setTableValue,
+  setTableValues,
+} from "./textTable";

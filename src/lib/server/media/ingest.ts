@@ -164,7 +164,7 @@ async function ingestImage(id: string, meta: MediaMeta): Promise<MediaMeta> {
 async function ingestFont(id: string, meta: MediaMeta): Promise<MediaMeta> {
   const font = readFontInfo(new Uint8Array(await readFile(mediaPaths.source(id, meta.ext))));
   if (!font) throw new Error("This file is not a font that can be read (TrueType, OpenType, WOFF or WOFF2)");
-  return updateMeta(id, { state: "ready", error: undefined, fontFamily: font.family, fontWeight: font.weight, fontStyle: font.style });
+  return updateMeta(id, { state: "ready", error: undefined, fontFamily: font.family, fontWeight: font.weight, fontStyle: font.style, fontArabic: font.arabic });
 }
 
 async function ingest(id: string): Promise<MediaMeta> {

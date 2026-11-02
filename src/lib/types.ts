@@ -205,6 +205,8 @@ export interface AiEditResponse {
   sceneCode?: string;
   /** optional extra/updated source files (css, helper components) */
   files?: { path: string; content: string }[];
+  /** new words for keys of the scene's TEXT table (a layer edit cannot reach the table at the top of the file) */
+  texts?: { key: string; value: string }[];
   /** usage info for the UI */
   usage?: { inputTokens: number; outputTokens: number; model: string };
 }

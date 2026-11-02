@@ -83,6 +83,18 @@ second under `pnpm dev` (each frame decodes a 1440×2560 JPEG), so a 46-second r
   the fonts its text uses (`whenSettled` in `src/runtime/pending.ts`), so a logo or a font from the
   library is on the first frame it appears in.
 
+## Fonts
+
+The editor's Text tab (`src/components/TextTab.tsx`) sets the font of each role in the scene's
+FONTS table, or of all text on the stage (one marked rule in `fonts.css`, for scenes without roles),
+from four places: font files in the library, an upload, the fonts installed on this computer, and
+Vazirmatn from Google Fonts. `GET /api/fonts/installed` lists the installed families (system and
+user font folders; TrueType and OpenType; families that cover Arabic script first), reading only
+each file's `name` and `OS/2` tables, so about 1,500 families list in a second or two once cached.
+Using one (`POST /api/fonts/installed/import { family }`) copies one file per weight and style into
+the library, so the scene loads it by reference like any other library font and exports render it.
+Faces are declared in the project's `fonts.css`, which the entry imports (`src/lib/fonts.ts`).
+
 ## What is said: transcripts
 
 A video or sound with speech can be transcribed on this computer with Whisper, so captions and cuts
@@ -109,6 +121,7 @@ word timings for the build.
 | `GET /api/media/<id>/file` | the file as imported, with Range support (sound, images, fonts); `Content-Security-Policy: sandbox`, so an SVG opened directly runs nothing |
 | `GET/POST/PUT /api/media/<id>/transcript` | the transcript's status and text; start Whisper (`{ language? }`); save corrections (`{ texts }`) |
 | `GET/POST /api/media/<id>/analysis` | a reference measured in full (contact sheets, transition strips, cuts, colours, loudness; [STORYBOARD.md](STORYBOARD.md#seen-in-full)); `GET …/analysis/<sheet-01.jpg>` serves its images |
+| `GET /api/fonts/installed`, `POST /api/fonts/installed/import` | the installed font families; copy one into the library (`{ family }`) |
 | `POST /api/media/import-url` | `{ url }`: download a video from a link with yt-dlp (no config, cookies or playlists; public hosts only; at most 1080 on the short side) into the library; answers 202 while it downloads |
 
 The library is local to the machine: a project that refers to `media/<id>` only plays where that

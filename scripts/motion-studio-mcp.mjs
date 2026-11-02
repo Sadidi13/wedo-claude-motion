@@ -301,6 +301,16 @@ const TOOLS = [
         summary: { type: "string", description: "One short paragraph describing the change, in the instruction's language." },
         code: { type: "string" },
         files: FILES_SCHEMA,
+        texts: {
+          type: "array",
+          description: 'New words for keys of the scene\'s TEXT table, e.g. [{"key":"title","value":"..."}]: in a layer answer the table is outside the layer.',
+          items: {
+            type: "object",
+            properties: { key: { type: "string" }, value: { type: "string" } },
+            required: ["key", "value"],
+            additionalProperties: false,
+          },
+        },
       },
       required: ["request_id", "summary", "code"],
       additionalProperties: false,
@@ -582,7 +592,8 @@ const HANDLERS = {
   wait_for_request: (args, signal, progress) => waitForRequest(args, signal, progress),
   answer_request: async (args) => {
     const id = requireString(args, "request_id");
-    await answer(id, { summary: requireString(args, "summary"), code: requireString(args, "code"), files: optionalFiles(args) });
+    const texts = Array.isArray(args?.texts) ? args.texts.filter((t) => typeof t?.key === "string" && typeof t?.value === "string") : [];
+    await answer(id, { summary: requireString(args, "summary"), code: requireString(args, "code"), files: optionalFiles(args), ...(texts.length ? { texts } : {}) });
     return text(`Answered request ${id}; the editor applies it within a second.`);
   },
   decline_request: async (args) => {

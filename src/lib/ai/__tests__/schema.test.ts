@@ -34,13 +34,14 @@ describe("AiEditRequestSchema", () => {
 });
 
 describe("AiOutputSchema", () => {
-  it("converts to a JSON schema with summary and code required and files optional", () => {
+  it("converts to a JSON schema with summary and code required, files and texts optional", () => {
     const format = zodOutputFormat(AiOutputSchema);
     expect(format.type).toBe("json_schema");
     expect(format.schema).toMatchObject({ type: "object", required: ["summary", "code"] });
     const properties = format.schema.properties as Record<string, unknown>;
-    expect(Object.keys(properties)).toEqual(["summary", "code", "files"]);
+    expect(Object.keys(properties)).toEqual(["summary", "code", "files", "texts"]);
     expect(format.parse('{"summary":"s","code":"<div />"}')).toEqual({ summary: "s", code: "<div />" });
+    expect(format.parse('{"summary":"s","code":"<div />","texts":[{"key":"title","value":"سلام"}]}')).toMatchObject({ texts: [{ key: "title", value: "سلام" }] });
     expect(() => format.parse('{"summary":"s"}')).toThrow(/code/);
   });
 });

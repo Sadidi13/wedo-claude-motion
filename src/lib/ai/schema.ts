@@ -104,6 +104,11 @@ export const AiOutputSchema = z.object({
     .array(AiOutputFileSchema)
     .optional()
     .describe("New or updated helper files referenced by `code`. Omit when nothing else changed."),
+  texts: z
+    .array(z.object({ key: z.string().max(200), value: z.string().max(4_000) }))
+    .max(100)
+    .optional()
+    .describe(`New words for keys of the scene's TEXT table (scope "layer": the words live at the top of the file, outside the layer). Omit when no text changes.`),
 });
 
 export type AiOutput = z.infer<typeof AiOutputSchema>;

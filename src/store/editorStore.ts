@@ -38,8 +38,14 @@ import {
   setLayerName,
   setLayerTiming,
   setStageMeta as parserSetStageMeta,
+  setJsxText,
+  setTableValue,
+  setTableValues,
+  type TableName,
   wrapInSprite as parserWrapInSprite,
 } from "@/lib/parser";
+import { ensureSideEffectImport } from "@/lib/parser/textTable";
+import { FONTS_CSS, type FontFace, familyValue, withAllTextFont, withCssImport, withFontFaces } from "@/lib/fonts";
 import type { AiChatTurn, AiScope, LayerRect, ParsedScene, Project, ProjectFile, StageMeta } from "@/lib/types";
 import { ancestorIds } from "./layerRows";
 import { createAutosaver, saveProject } from "./persistence";
@@ -137,8 +143,20 @@ export interface EditorState {
   wrapInSprite(id: string, start: number, end: number): void;
   /** throws on invalid JSX; returns the new layer id */
   insertLayer(parentId: string | null, jsx: string, index?: number): string;
-  /** throws on invalid JSX (surfaced inline by the Code / Ask Claude tabs) */
-  replaceLayer(id: string, jsx: string): void;
+  /**
+   * Throws on invalid JSX (surfaced inline by the Code / Ask Claude tabs). `texts` are new words for
+   * TEXT keys (a layer edit from Claude), written in the same Undo step; unknown keys are skipped.
+   */
+  replaceLayer(id: string, jsx: string, texts?: { key: string; value: string }[]): void;
+  /** one string of the scene's TEXT or FONTS table (the Text tab); one Undo step; false on failure (notice shown) */
+  setTableText(table: TableName, key: string, value: string): boolean;
+  /** one piece of plain JSX text, for scenes without a TEXT table (`key` from readJsxTexts) */
+  setJsxTextValue(key: string, value: string): boolean;
+  /**
+   * Use a font: its faces go into fonts.css (imported by the entry), then `role` in the FONTS table
+   * names it, or with role null every text on the stage uses it ("all text"; family null removes that).
+   */
+  applyFont(input: { role: string | null; family: string | null; faces?: FontFace[]; webCss?: string }): boolean;
   setStageMeta(meta: Partial<StageMeta>): void;
   addTextLayer(): void;
   addImageLayer(file: File): Promise<void>;
@@ -597,12 +615,36 @@ export const useEditorStore = create<EditorState>()((set, get) => {
       return id;
     },
 
-    replaceLayer(id, jsx) {
+    replaceLayer(id, jsx, texts) {
       const { project, scene } = get();
       if (!project) throw new Error("No project loaded");
       const node = scene?.byId[id];
       if (node?.locked) throw new Error(`"${node.name}" is locked. Unlock it to edit.`);
-      commitSource(replaceLayerSource(entrySource(project), id, jsx), { recordHistory: true });
+      const replaced = replaceLayerSource(entrySource(project), id, jsx);
+      const changes = (texts ?? []).map(({ key, value }) => ({ table: "TEXT" as const, key, value }));
+      commitSource(changes.length ? setTableValues(replaced, changes).source : replaced, { recordHistory: true });
+    },
+
+    setTableText(table, key, value) {
+      return tryEdit((source) => setTableValue(source, table, key, value));
+    },
+
+    setJsxTextValue(key, value) {
+      return tryEdit((source) => setJsxText(source, key, value));
+    },
+
+    applyFont({ role, family, faces = [], webCss }) {
+      const { project } = get();
+      if (!project) return false;
+      let css = project.files[FONTS_CSS]?.content ?? "";
+      if (webCss) css = withCssImport(css, webCss);
+      css = withFontFaces(css, faces);
+      if (role === null) css = withAllTextFont(css, family);
+      if (css !== (project.files[FONTS_CSS]?.content ?? "")) get().updateFile(FONTS_CSS, css);
+      return tryEdit((source) => {
+        const imported = ensureSideEffectImport(source, `./${FONTS_CSS}`);
+        return role !== null && family !== null ? setTableValue(imported, "FONTS", role, familyValue(family)) : imported;
+      });
     },
 
     setStageMeta(meta) {

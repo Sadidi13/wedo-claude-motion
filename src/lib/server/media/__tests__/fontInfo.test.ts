@@ -1,6 +1,6 @@
 import { brotliCompressSync, deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { readFontInfo } from "../fontInfo";
+import { readFontInfo, readFontInfoFromFile } from "../fontInfo";
 
 /** A `name` table with Windows (UTF-16BE) records. */
 function nameTable(records: [nameId: number, text: string][]): Uint8Array {
@@ -32,11 +32,12 @@ function nameTable(records: [nameId: number, text: string][]): Uint8Array {
   return table;
 }
 
-/** An `OS/2` table with the weight class and the italic bit. */
-function os2Table(weight: number, italic: boolean): Uint8Array {
+/** An `OS/2` table with the weight class, the italic bit and (optionally) the Arabic range bit. */
+function os2Table(weight: number, italic: boolean, arabic = false): Uint8Array {
   const table = new Uint8Array(96);
   const view = new DataView(table.buffer);
   view.setUint16(4, weight);
+  if (arabic) view.setUint32(42, 1 << 13);
   view.setUint16(62, italic ? 1 : 0x40);
   return table;
 }
@@ -119,7 +120,9 @@ describe("readFontInfo", () => {
       subfamily: "Bold",
       weight: 700,
       style: "normal",
+      arabic: false,
     });
+    expect(readFontInfo(sfnt([["name", NAME], ["OS/2", os2Table(400, false, true)]]))?.arabic).toBe(true);
   });
 
   it("falls back to the legacy family and guesses the weight without an OS/2 table", () => {
@@ -127,7 +130,18 @@ describe("readFontInfo", () => {
       [1, "Vazir"],
       [2, "Bold Italic"],
     ]);
-    expect(readFontInfo(sfnt([["name", name]]))).toEqual({ family: "Vazir", subfamily: "Bold Italic", weight: 700, style: "italic" });
+    expect(readFontInfo(sfnt([["name", name]]))).toEqual({ family: "Vazir", subfamily: "Bold Italic", weight: 700, style: "italic", arabic: false });
+  });
+
+  it("reads only the tables it needs from a file", async () => {
+    const bytes = sfnt([["glyf", new Uint8Array(5000)], ["name", NAME], ["OS/2", os2Table(900, false, true)]]);
+    const reads: [number, number][] = [];
+    const info = await readFontInfoFromFile(async (offset, length) => {
+      reads.push([offset, length]);
+      return bytes.subarray(offset, offset + length);
+    });
+    expect(info).toMatchObject({ family: "Brand Sans", weight: 900, arabic: true });
+    expect(reads.reduce((sum, [, length]) => sum + length, 0)).toBeLessThan(1000);
   });
 
   it("reads WOFF (zlib tables) and WOFF2 (one brotli stream)", () => {
