@@ -50,6 +50,7 @@ import type { AiChatTurn, AiScope, LayerRect, ParsedScene, Project, ProjectFile,
 import { ancestorIds } from "./layerRows";
 import { createAutosaver, saveProject } from "./persistence";
 import { saveVersion } from "./versions";
+import { REAL_SOUNDS, type RealSound, isRealSoundName, realSoundLabel } from "@/lib/audio/realSounds";
 import { SFX, isSfxName } from "@/lib/audio/sfx";
 import type { MotionSpec } from "@/lib/motion/keyframes";
 import {
@@ -169,6 +170,8 @@ export interface EditorState {
   addVideoLayer(file: File): Promise<void>;
   /** a built-in sound effect (or a looping bed under the rest of the scene) at the playhead */
   addSfxLayer(name: string): void;
+  /** a real recorded sound whose hit lands on the playhead (src/lib/audio/realSounds.ts) */
+  addRealSoundLayer(name: string): void;
 
   undo(): void;
   redo(): void;
@@ -767,6 +770,33 @@ export const useEditorStore = create<EditorState>()((set, get) => {
           undefined,
           "Audio",
         );
+      } catch (error) {
+        set({ notice: { kind: "error", message: errorMessage(error) } });
+      }
+    },
+
+    addRealSoundLayer(name) {
+      const { scene, time } = get();
+      if (!scene || !isRealSoundName(name)) return;
+      try {
+        const sound: RealSound = REAL_SOUNDS[name];
+        if (sound.music) {
+          // A bed plays from the playhead to the end of the stage (looping when it is shorter), fading out.
+          const start = Number(snapToFrame(clamp(time, 0, scene.meta.duration), scene.meta.fps).toFixed(3));
+          const covers = sound.duration >= scene.meta.duration - start;
+          const toEnd = covers || sound.music.loops ? { end: scene.meta.duration, loop: !covers } : {};
+          insertTemplate(audioLayerTemplate({ sound: name, start, ...toEnd, volume: 0.4, fadeOut: 1, name: realSoundLabel(name) }), undefined, "Audio");
+          return;
+        }
+        // A whoosh rushes in before the moment it belongs to: start the clip `peak` seconds early so its
+        // hit is on the playhead, or skip into it when the playhead is closer to the start than that.
+        const at = clamp(time, 0, scene.meta.duration);
+        const start = Number(snapToFrame(Math.max(0, at - sound.peak), scene.meta.fps).toFixed(3));
+        const from = Number(Math.max(0, sound.peak - at).toFixed(3));
+        insertTemplate(audioLayerTemplate({ sound: name, start, from, name: realSoundLabel(name) }), undefined, "Audio");
+        if (sound.peak >= 0.1) {
+          set({ notice: { kind: "info", message: `“${realSoundLabel(name)}” hits on the playhead: it starts ${Math.min(sound.peak, at).toFixed(2)} s before it.` } });
+        }
       } catch (error) {
         set({ notice: { kind: "error", message: errorMessage(error) } });
       }

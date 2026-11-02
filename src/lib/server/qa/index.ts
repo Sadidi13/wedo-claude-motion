@@ -5,11 +5,13 @@
  * notice: text cut off or crowding the edge, clipped or overlapping text, low
  * contrast against the background, tiny or left-to-right Persian text, text on
  * screen too briefly, empty or frozen stretches. Runs locally; it costs no
- * Claude usage, and Claude gets the findings as text.
+ * Claude usage, and Claude gets the findings as text. For the autopilot's
+ * visual review after a build it also saves contact sheets of the frames.
  */
 
-import { rm } from "node:fs/promises";
-import { chromium } from "playwright-core";
+import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { chromium, type Page } from "playwright-core";
 import type { Project } from "@/lib/types";
 import { createJob, jobDir } from "../export/jobs";
 import {
@@ -24,9 +26,9 @@ import {
 } from "../export/renderer";
 import { ExportRequestError } from "../export/schema";
 import { ensureMediaReady } from "../media/ingest";
-import { type FrameSample, type QaReport, type TextSample, buildIssues } from "./analyze";
+import { type FrameSample, type QaReport, type QaReview, type TextSample, buildIssues } from "./analyze";
 
-export { formatReport, type QaIssue, type QaReport } from "./analyze";
+export { formatReport, type QaIssue, type QaReport, type QaReview } from "./analyze";
 
 /** Screenshots are taken at this fraction of the stage size: plenty for luminance, quick to grab. */
 const SAMPLE_SCALE = 0.5;
@@ -35,6 +37,98 @@ const MAX_SAMPLES = 60;
 const READY_TIMEOUT_MS = 60_000;
 
 let running = false;
+
+/** A review shows this many frames, six to a sheet. */
+const REVIEW_FRAMES = 12;
+const REVIEW_PER_SHEET = 6;
+/** Longest side of a sheet: the size Claude looks at an image without shrinking it. */
+const REVIEW_SHEET_MAX = 1568;
+
+export interface ReviewLayout {
+  /** indexes of the samples shown, evenly spread, first and last included */
+  picks: number[];
+  columns: number;
+  rows: number;
+  tileWidth: number;
+  tileHeight: number;
+}
+
+/** Which samples a review shows and how a sheet lays them out for the stage's shape. */
+export function reviewLayout(width: number, height: number, samples: number): ReviewLayout {
+  const count = Math.min(REVIEW_FRAMES, samples);
+  const picks = count <= 1 ? [0] : Array.from({ length: count }, (_, i) => Math.round((i * (samples - 1)) / (count - 1)));
+  const columns = width >= height * 1.2 ? 2 : 3;
+  const rows = REVIEW_PER_SHEET / columns;
+  const scale = Math.min(REVIEW_SHEET_MAX / (columns * width), REVIEW_SHEET_MAX / (rows * height));
+  return { picks, columns, rows, tileWidth: Math.round(width * scale), tileHeight: Math.round(height * scale) };
+}
+
+interface SheetInput {
+  frames: string[];
+  labels: string[];
+  columns: number;
+  tileWidth: number;
+  tileHeight: number;
+}
+
+/** Runs in the page: the frames tiled into one JPEG (base64), each with its time in the corner. */
+async function composeSheet(input: SheetInput): Promise<string> {
+  const rows = Math.ceil(input.frames.length / input.columns);
+  const canvas = document.createElement("canvas");
+  canvas.width = input.columns * input.tileWidth;
+  canvas.height = rows * input.tileHeight;
+  const context = canvas.getContext("2d")!;
+  context.fillStyle = "#000";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.font = "600 18px system-ui, sans-serif";
+  context.textBaseline = "middle";
+  for (const [i, data] of input.frames.entries()) {
+    const image = new Image();
+    image.src = `data:image/jpeg;base64,${data}`;
+    await image.decode();
+    const x = (i % input.columns) * input.tileWidth;
+    const y = Math.floor(i / input.columns) * input.tileHeight;
+    context.drawImage(image, x, y, input.tileWidth, input.tileHeight);
+    context.strokeStyle = "#000";
+    context.lineWidth = 2;
+    context.strokeRect(x + 1, y + 1, input.tileWidth - 2, input.tileHeight - 2);
+    const label = input.labels[i];
+    const width = context.measureText(label).width + 14;
+    context.fillStyle = "rgba(0, 0, 0, 0.72)";
+    context.fillRect(x + 6, y + 6, width, 26);
+    context.fillStyle = "#fff";
+    context.fillText(label, x + 13, y + 19);
+  }
+  return canvas.toDataURL("image/jpeg", 0.86).slice("data:image/jpeg;base64,".length);
+}
+
+/** Where a review's sheets go: `<dir>/<name>-1.jpg`, … (earlier sheets in the folder are removed). */
+export interface ReviewTarget {
+  dir: string;
+  name: string;
+}
+
+async function writeReviewSheets(page: Page, layout: ReviewLayout, frames: { data: string; t: number }[], target: ReviewTarget): Promise<QaReview> {
+  await mkdir(target.dir, { recursive: true });
+  for (const name of await readdir(target.dir)) {
+    if (name.endsWith(".jpg")) await rm(path.join(target.dir, name), { force: true });
+  }
+  const sheets: QaReview["sheets"] = [];
+  for (let first = 0; first < frames.length; first += REVIEW_PER_SHEET) {
+    const chunk = frames.slice(first, first + REVIEW_PER_SHEET);
+    const jpeg = await page.evaluate(composeSheet, {
+      frames: chunk.map((frame) => frame.data),
+      labels: chunk.map((frame) => `${Number(frame.t.toFixed(2))} s`),
+      columns: layout.columns,
+      tileWidth: layout.tileWidth,
+      tileHeight: layout.tileHeight,
+    });
+    const file = path.join(target.dir, `${target.name}-${sheets.length + 1}.jpg`);
+    await writeFile(file, Buffer.from(jpeg, "base64"));
+    sheets.push({ file, times: chunk.map((frame) => frame.t) });
+  }
+  return { columns: layout.columns, rows: layout.rows, sheets };
+}
 
 /** Sample times: about two per second, centred in their slots, capped for long videos. */
 export function sampleTimes(duration: number): { times: number[]; step: number } {
@@ -198,8 +292,11 @@ async function analysePixels(input: PixelInput): Promise<PixelResult> {
 const HIDE_TEXT_CSS =
   "[data-stage] * { color: transparent !important; text-shadow: none !important; -webkit-text-stroke-color: transparent !important; caret-color: transparent !important; }";
 
-/** Render the project headlessly and report what a designer should fix. One check at a time. */
-export async function runQualityCheck(project: Project, origin: string): Promise<QaReport> {
+/**
+ * Render the project headlessly and report what a designer should fix. One check at a time. With
+ * `review`, contact sheets of the frames are saved there for a visual review.
+ */
+export async function runQualityCheck(project: Project, origin: string, options: { review?: ReviewTarget } = {}): Promise<QaReport> {
   if (running) throw new ExportRequestError("A quality check is already running. Try again when it is done.", 429);
   running = true;
   let jobId: string | null = null;
@@ -232,8 +329,10 @@ export async function runQualityCheck(project: Project, origin: string): Promise
       await page.evaluate(() => document.fonts.ready.then(() => undefined));
       const clip = { x: 0, y: 0, width: meta.width, height: meta.height };
       const frames: FrameSample[] = [];
+      const layout = options.review ? reviewLayout(meta.width, meta.height, times.length) : null;
+      const kept = new Map<number, string>();
       let previous: number[] | null = null;
-      for (const t of times) {
+      for (const [index, t] of times.entries()) {
         await page.evaluate(
           (time) =>
             new Promise<void>((resolve, reject) => {
@@ -246,7 +345,8 @@ export async function runQualityCheck(project: Project, origin: string): Promise
           t,
         );
         const texts = await page.evaluate(collectTexts);
-        const normal = (await page.screenshot({ type: "jpeg", quality: 70, clip })).toString("base64");
+        const normal = (await page.screenshot({ type: "jpeg", quality: layout ? 85 : 70, clip })).toString("base64");
+        if (layout?.picks.includes(index)) kept.set(index, normal);
         let hidden: string | null = null;
         if (texts.length) {
           const handle = await page.addStyleTag({ content: HIDE_TEXT_CSS });
@@ -272,7 +372,12 @@ export async function runQualityCheck(project: Project, origin: string): Promise
           }),
         });
       }
-      return { duration: meta.duration, frames: frames.length, issues: buildIssues(frames, meta, step) };
+      const report: QaReport = { duration: meta.duration, frames: frames.length, issues: buildIssues(frames, meta, step) };
+      if (layout && options.review) {
+        const shown = layout.picks.map((i) => ({ data: kept.get(i) ?? "", t: times[i] })).filter((frame) => frame.data);
+        report.review = await writeReviewSheets(page, layout, shown, options.review);
+      }
+      return report;
     } finally {
       await browser.close();
     }

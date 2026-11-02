@@ -14,11 +14,12 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { realSoundDuration } from "@/lib/audio/realSounds";
 import { sfxDuration } from "@/lib/audio/sfx";
 import { dataUrlToBytes } from "@/lib/importer/dataUrl";
 import { mediaIdOf } from "@/lib/media";
 import type { AudioClip } from "@/runtime/audio";
-import { ensureSfx } from "../audio";
+import { ensureRealSound, ensureSfx } from "../audio";
 import { mediaPaths, readMeta } from "../media/store";
 import { runFfmpeg } from "./ffmpeg";
 
@@ -54,7 +55,7 @@ function isClip(value: unknown): value is AudioClip {
     typeof clip === "object" &&
     clip !== null &&
     typeof clip.key === "string" &&
-    (typeof clip.src === "string" || typeof clip.sfx === "string") &&
+    (typeof clip.src === "string" || typeof clip.sfx === "string" || typeof clip.sound === "string") &&
     Number.isFinite(clip.start) &&
     (clip.end === null || Number.isFinite(clip.end)) &&
     Number.isFinite(clip.from) &&
@@ -91,6 +92,10 @@ export async function prepareAudio(
   const skipped: string[] = [];
   for (const [index, clip] of clips.entries()) {
     try {
+      if (clip.sound) {
+        inputs.push({ clip, file: await ensureRealSound(clip.sound), length: realSoundDuration(clip.sound) });
+        continue;
+      }
       if (clip.sfx) {
         inputs.push({ clip, file: await ensureSfx(clip.sfx), length: sfxDuration(clip.sfx) });
         continue;

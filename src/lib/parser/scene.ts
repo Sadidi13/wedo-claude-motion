@@ -13,6 +13,7 @@
  * the parent range; the root range is [0, meta.duration].
  */
 import type * as t from "@babel/types";
+import { realSoundDuration } from "@/lib/audio/realSounds";
 import { sfxDuration } from "@/lib/audio/sfx";
 import { parseMotion } from "@/lib/motion/keyframes";
 import type { LayerKind, LayerNode, ParsedScene, StageMeta } from "@/lib/types";
@@ -140,9 +141,11 @@ function buildNode(
     start = startAttr ? attrNumber(startAttr) : 0;
     end = endAttr ? attrNumber(endAttr) : Infinity;
     if (!endAttr && isAudioTag(tag) && start !== undefined) {
-      // A built-in sound without `end` plays its own length.
-      const length = sfxDuration(attrString(findAttr(node, "sfx")) ?? "");
-      if (length !== undefined && !attrIsTrue(findAttr(node, "loop"))) end = start + length;
+      // A real or built-in sound without `end` plays its own length, less what `from` skips.
+      const length = realSoundDuration(attrString(findAttr(node, "sound"))) ?? sfxDuration(attrString(findAttr(node, "sfx")) ?? "");
+      const fromAttr = findAttr(node, "from");
+      const skip = (fromAttr ? attrNumber(fromAttr) : 0) ?? 0;
+      if (length !== undefined && !attrIsTrue(findAttr(node, "loop"))) end = start + Math.max(0, length - skip);
     }
     if (startAttr && start === undefined) {
       warnings.push(`${label} "${id}" (line ${line}) has a dynamic "start"; its timing is read-only`);
@@ -189,6 +192,7 @@ function buildNode(
     };
     layer.audio = {
       src: attrString(findAttr(node, "src")),
+      sound: attrString(findAttr(node, "sound")),
       sfx: attrString(findAttr(node, "sfx")),
       from: number("from"),
       volume: number("volume"),

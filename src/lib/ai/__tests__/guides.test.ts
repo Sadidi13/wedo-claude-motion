@@ -1,6 +1,7 @@
-/** The contract sections that list catalogues: built-in sounds and the style library stay in step with the code. */
+/** The contract sections that list catalogues: the sound bank and the style library stay in step with the code. */
 import { describe, expect, it } from "vitest";
-import { SFX, SFX_NAMES } from "@/lib/audio/sfx";
+import { realMusicMarkdown, realSoundsMarkdown } from "@/lib/audio/realSounds";
+import { SFX_NAMES } from "@/lib/audio/sfx";
 import { SYSTEM_PROMPT } from "../prompts";
 import { STORYBOARD_GUIDE } from "../storyboard";
 import { STYLE_LIBRARY, styleLibraryMarkdown } from "../styleLibrary";
@@ -8,16 +9,14 @@ import { STYLE_LIBRARY, styleLibraryMarkdown } from "../styleLibrary";
 describe("sound section", () => {
   const section = SYSTEM_PROMPT.slice(SYSTEM_PROMPT.indexOf("# 5. Sound"), SYSTEM_PROMPT.indexOf("# 6. Export"));
 
-  it("names every built-in sound, and only those", () => {
-    for (const name of SFX_NAMES) expect(section).toContain(name);
-    const listed = section.match(/Names: ([^.]+)\./)![1].replace("and the looping beds", "").split(/,\s*/).map((name) => name.trim()).filter(Boolean);
-    expect(listed.sort()).toEqual([...SFX_NAMES].sort());
+  it("lists every real effect with its hit time and every music bed with its beat", () => {
+    expect(section).toContain(realSoundsMarkdown());
+    expect(section).toContain(realMusicMarkdown());
   });
 
-  it("calls the looping ones beds", () => {
-    const beds = SFX_NAMES.filter((name) => SFX[name].loop);
-    expect(beds.sort()).toEqual(["beat-120", "beat-90", "pad"]);
-    for (const name of beds) expect(section).toMatch(new RegExp(`looping beds[^.]*${name}`));
+  it("no longer offers the synthesized sounds for new scenes", () => {
+    for (const name of SFX_NAMES) expect(section).not.toContain(`sfx="${name}"`);
+    expect(section).toContain("the old synthesized `sfx` sounds are kept only so older scenes still play");
   });
 });
 

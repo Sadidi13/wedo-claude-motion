@@ -1,6 +1,10 @@
-/** The export's sound mix: merging the clips the render pages report, and the ffmpeg graph. */
+/** The export's sound mix: merging the clips the render pages report, their sources, and the ffmpeg graph. */
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { type AudioClip, type PreparedClip, buildAudioMixArgs, mergeClips } from "../audio";
+import { realSoundFile } from "../../audio";
+import { type AudioClip, type PreparedClip, buildAudioMixArgs, mergeClips, prepareAudio } from "../audio";
 
 const clip = (over: Partial<AudioClip> = {}): AudioClip => ({
   key: "a",
@@ -21,8 +25,27 @@ describe("mergeClips", () => {
   it("keeps each clip once across workers and drops malformed entries", () => {
     const a = clip({ key: "a" });
     const b = clip({ key: "b", sfx: undefined, src: "data:audio/wav;base64,AA==" });
-    const merged = mergeClips([[a, b], [a], "nope", [{ key: "c", start: "1" }, null, { ...a, key: "d", volume: Number.NaN }]]);
-    expect(merged).toEqual([a, b]);
+    const c = clip({ key: "c", sfx: undefined, sound: "whoosh-fast" });
+    const merged = mergeClips([[a, b], [a, c], "nope", [{ key: "e", start: "1" }, null, { ...a, key: "d", volume: Number.NaN }]]);
+    expect(merged).toEqual([a, b, c]);
+  });
+});
+
+describe("prepareAudio", () => {
+  it("mixes a real sound from its cached recording, for its own length", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "ms-mix-"));
+    process.env.MOTION_STUDIO_SOUNDS_DIR = dir;
+    try {
+      const cached = realSoundFile("whoosh-fast");
+      await writeFile(cached, "RIFF");
+      const whoosh = clip({ key: "w", sfx: undefined, sound: "whoosh-fast", start: 1 });
+      const { inputs, skipped } = await prepareAudio(path.join(dir, "job"), [whoosh]);
+      expect(skipped).toEqual([]);
+      expect(inputs).toEqual([{ clip: whoosh, file: cached, length: 2.13 }]);
+    } finally {
+      delete process.env.MOTION_STUDIO_SOUNDS_DIR;
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

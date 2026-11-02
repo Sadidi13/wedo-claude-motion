@@ -8,6 +8,7 @@
 import { Braces, Clapperboard, Copy, Trash2 } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { REAL_SOUNDS, isRealSoundName, realSoundLabel } from "@/lib/audio/realSounds";
 import { SFX } from "@/lib/audio/sfx";
 import type { LayerNode, StageMeta } from "@/lib/types";
 import { useEditorStore } from "@/store/editorStore";
@@ -168,7 +169,13 @@ function LayerProperties({ node, meta, onOpenCode }: { node: LayerNode; meta: St
 
 function AudioSection({ node, audio }: { node: LayerNode; audio: NonNullable<LayerNode["audio"]> }) {
   const store = useEditorStore.getState();
-  const source = audio.sfx ? `Sound effect: ${SFX[audio.sfx]?.label ?? audio.sfx}` : audio.src ? `File: ${audio.src.startsWith("data:") ? "embedded" : audio.src}` : "No source";
+  const source = isRealSoundName(audio.sound)
+    ? `Sound: ${realSoundLabel(audio.sound)} (“${REAL_SOUNDS[audio.sound].source.title}” by ${REAL_SOUNDS[audio.sound].source.author}, CC0)`
+    : audio.sfx
+      ? `Sound effect: ${SFX[audio.sfx]?.label ?? audio.sfx}`
+      : audio.src
+        ? `File: ${audio.src.startsWith("data:") ? "embedded" : audio.src}`
+        : "No source";
   const volume = audio.volume ?? 1;
   return (
     <Section title="Sound">

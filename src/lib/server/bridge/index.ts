@@ -9,6 +9,7 @@ export {
   BRIDGE_ID_PATTERN,
   BridgeStateError,
   TOKEN_HEADER,
+  bridgeRoot,
   bridgeStatus,
   bridgeToken,
   claimNextRequest,

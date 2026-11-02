@@ -61,7 +61,7 @@ export interface Project {
 
 export type LayerKind =
   | "sprite" // <Sprite start end>
-  | "audio" // <Audio src|sfx start end>: a sound clip, timed like a Sprite
+  | "audio" // <Audio src|sound|sfx start end>: a sound clip, timed like a Sprite
   | "text" // element whose only children are text/expressions
   | "image" // <img> / <Image> / <video> / <Video>
   | "shape" // <svg>, <div> with no text children, <circle> …
@@ -114,6 +114,8 @@ export interface LayerNode {
 
 export interface LayerAudio {
   src?: string;
+  /** a real recorded sound (src/lib/audio/realSounds.ts) */
+  sound?: string;
   sfx?: string;
   from?: number;
   volume?: number;

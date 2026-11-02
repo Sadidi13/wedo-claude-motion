@@ -405,47 +405,109 @@ async function waitForOpenProject(projectId, seconds = 20) {
   return false;
 }
 
-/** After a build: the local quality check, and one Claude run to fix real errors (warnings are left to the designer). */
-async function polishBuiltVideo(bin, model, built) {
+/** Reference images shown next to the frames in the review after a build, at most. */
+const MAX_REVIEW_REFERENCES = 6;
+
+/** The review's images (base64 JPEGs: the build's contact sheets, then the references) and what each one is. */
+async function reviewImages(report, board) {
+  const images = [];
+  const labels = [];
+  for (const sheet of report.review?.sheets ?? []) {
+    try {
+      images.push((await readFile(sheet.file)).toString("base64"));
+      labels.push(`your video: the frames at ${sheet.times.map((t) => `${Number(t.toFixed(2))}s`).join(", ")}, left to right, top to bottom`);
+    } catch {
+      say(`  Review sheet missing: ${sheet.file}`);
+    }
+  }
+  const sheets = images.length;
+  if (sheets > 0 && board) {
+    for (const { file, label } of boardReferenceFiles(board).slice(0, MAX_REVIEW_REFERENCES)) {
+      try {
+        images.push((await readFile(file)).toString("base64"));
+        labels.push(`the designer's reference, ${label}`);
+      } catch {
+        say(`  Reference preview missing: ${file}`);
+      }
+    }
+  }
+  return { images, labels, sheets };
+}
+
+function issueLine(issue) {
+  return `- ${issue.severity}, ${issue.start.toFixed(1)}-${issue.end.toFixed(1)}s${issue.layerId ? ` (layer ${issue.layerId})` : ""}: ${issue.message}`;
+}
+
+/** What Claude is asked after a build: look at the frames (next to the references) and fix what falls short. */
+function reviewPrompt(code, board, { errors, warnings, labels }) {
+  const chosen = board?.styles?.find((style) => style.id === board.chosenStyleId);
+  return [
+    "You built the video below from the storyboard the designer approved. Before the designer sees it, review it the way a senior motion designer reviews a cut, and fix what falls short.",
+    "",
+    ...(labels.length
+      ? ["# The images (attached after this text, in this order)", "", ...labels.map((label, i) => `- Image ${i + 1}: ${label}`), ""]
+      : []),
+    "# Review",
+    "",
+    labels.length > 0 && labels.some((label) => label.startsWith("the designer's reference"))
+      ? "- Against the reference: palette and contrast, type size relative to the frame, how full the frame is, composition, how elements enter and leave, the pace of the cuts. The video should feel made by the same hand."
+      : "- Against the style frame the designer chose and the style spec below: palette, type, composition and density.",
+    "- Finish: one focal point at a time, clear hierarchy, nothing cramped, cut off or outside the safe margins, captions legible at phone size, Persian right to left in a clean sans (no calligraphic face for short words).",
+    "- Motion, from the code: easing with weight (no linear moves except continuous ones), overshoot and settle on the key elements, motion blur or a smear on fast moves, no stretch frozen for long.",
+    "- Sound, from the code: real sounds (`<Audio sound>`) on the moments that need them, each hit on its visual moment (section 5 lists every sound's hit time), music under speech.",
+    ...(errors.length || warnings.length
+      ? ["", "An automatic check that rendered the video found these (fix every error; fix a warning when it is real):", ...[...errors, ...warnings].map(issueLine)]
+      : []),
+    "",
+    "Change only what clearly makes the video better: at most five fixes, the most visible first. Keep the layers and every data-layer-id, the TEXT and FONTS tables, the storyboard's shots and their timing.",
+    'Reply with ONLY a JSON object: {"ok": true, "summary": "<one sentence>"} when the video already meets the bar and nothing needs fixing, otherwise {"summary": "<what you changed, one or two sentences, in the language of the video\'s text>", "code": "<the complete corrected entry file>"}.',
+    ...(chosen ? ["", `# The chosen style: ${chosen.name}`, "", chosen.description] : []),
+    ...(board?.styleSpec ? ["", "# Style spec", "", board.styleSpec] : []),
+    "",
+    "# The video",
+    "",
+    "```jsx",
+    code,
+    "```",
+  ].join("\n");
+}
+
+/**
+ * After a build: the local quality check renders the video and saves contact sheets of its frames;
+ * one Claude run looks at them next to the designer's references, with the check's findings, and
+ * fixes what falls short before the designer looks. Without sheets, only errors are fixed.
+ */
+async function polishBuiltVideo(bin, model, built, board) {
   let report;
   try {
-    ({ report } = await checkQuality(built.eventId));
+    ({ report } = await checkQuality(built.eventId, { review: true }));
   } catch (error) {
     say(`  Quality check skipped: ${error.message}`);
     return;
   }
   const errors = report.issues.filter((issue) => issue.severity === "error");
-  if (errors.length === 0) {
-    say(`  Quality check: ${report.issues.length ? `${report.issues.length} suggestion(s), no errors` : "no problems"}`);
-    return;
-  }
-  say(`  Quality check: ${errors.length} problem(s); asking Claude to fix them`);
+  const warnings = report.issues.filter((issue) => issue.severity !== "error");
+  say(`  Quality check: ${errors.length} problem(s), ${warnings.length} suggestion(s)`);
+  const { images, labels, sheets } = await reviewImages(report, board);
+  if (sheets === 0 && errors.length === 0) return;
   if (!(await waitForOpenProject(built.projectId))) {
-    say("  The editor did not open the new video, so the fixes were not sent. Use Check in the editor.");
+    say("  The editor did not open the new video, so the review was skipped. Use Check in the editor.");
     return;
   }
-  const prompt = [
-    "You built the video below. A quality check that rendered it found these problems:",
-    "",
-    ...errors.map((issue) => `- ${issue.start.toFixed(1)}-${issue.end.toFixed(1)}s${issue.layerId ? ` (layer ${issue.layerId})` : ""}: ${issue.message}`),
-    "",
-    "Fix them and keep everything else exactly as it is: the same layers, data-layer-id values, timing and style.",
-    'Reply with ONLY a JSON object: {"summary": "<one sentence, in the language of the video\'s text>", "code": "<the complete corrected entry file>"}',
-    "",
-    "# The video",
-    "",
-    "```jsx",
-    built.code,
-    "```",
-  ].join("\n");
+  say(sheets ? `  Reviewing the frames${images.length > sheets ? ` next to ${images.length - sheets} reference image(s)` : ""}` : "  Asking Claude to fix the problems");
+  const prompt = reviewPrompt(built.code, board, { errors, warnings: sheets ? warnings : [], labels });
   try {
-    const run = await runClaude(bin, prompt, { model, kind: "deep" });
+    const run = await runClaude(bin, prompt, { model, kind: "deep", images });
+    if (parseJsonObject(run.text)?.ok === true) {
+      say(`  Review: nothing to fix (${String(parseJsonObject(run.text).summary ?? "").replace(/\s+/g, " ").slice(0, 140)})`);
+      return;
+    }
     const reply = parseReply(run.text);
     if ("error" in reply) return;
-    await push({ type: "edit", summary: reply.summary, code: reply.code, prompt: "Quality check fixes", ...(reply.files ? { files: reply.files } : {}) });
-    say(`  Fixed: ${reply.summary.replace(/\s+/g, " ").slice(0, 160)}`);
+    await push({ type: "edit", summary: reply.summary, code: reply.code, prompt: "Review after the build", ...(reply.files ? { files: reply.files } : {}) });
+    say(`  Improved: ${reply.summary.replace(/\s+/g, " ").slice(0, 160)}`);
   } catch (error) {
-    say(`  Could not fix automatically: ${error.message}`);
+    say(`  Could not review automatically: ${error.message}`);
   }
 }
 
@@ -488,7 +550,7 @@ async function handleBoardStep(bin, request, model) {
       }
       const delivered = await deliverBoardStep(request, reply);
       say(`  ${delivered.message}`);
-      if (delivered.built) await polishBuiltVideo(bin, model, delivered.built);
+      if (delivered.built) await polishBuiltVideo(bin, model, delivered.built, request.board);
       return;
     } catch (error) {
       if (error instanceof BridgeValidationError && attempt === 1) {

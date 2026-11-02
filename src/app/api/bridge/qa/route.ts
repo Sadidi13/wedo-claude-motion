@@ -2,9 +2,12 @@
  * POST /api/bridge/qa (CLI, token) — the quality check for Claude: of the scene
  * a pushed event created (`{ eventId }` of a new scene), or of the project open
  * in the editor (after an edit, `{ eventId }` waits until the editor shared the
- * edited project). Answers `{ report, text }`.
+ * edited project). Answers `{ report, text }`. With `review: true` the report
+ * also lists contact sheets of the frames, saved in the bridge folder
+ * (`reviews/`), for the autopilot's visual review after a build.
  */
-import { readEvent, readJsonBody, readSyncedProject, requireToken } from "@/lib/server/bridge";
+import path from "node:path";
+import { bridgeRoot, isValidBridgeId, readEvent, readJsonBody, readSyncedProject, requireToken } from "@/lib/server/bridge";
 import { ExportRequestError } from "@/lib/server/export";
 import { formatReport, runQualityCheck } from "@/lib/server/qa";
 import type { Project } from "@/lib/types";
@@ -27,12 +30,14 @@ async function projectToCheck(eventId: string | undefined): Promise<Project | nu
 export async function POST(request: Request): Promise<Response> {
   const denied = await requireToken(request);
   if (denied) return denied;
-  const body = (await readJsonBody(request)) as { eventId?: unknown } | null;
+  const body = (await readJsonBody(request)) as { eventId?: unknown; review?: unknown } | null;
   const eventId = typeof body?.eventId === "string" ? body.eventId : undefined;
+  const review =
+    body?.review === true ? { dir: path.join(bridgeRoot(), "reviews"), name: eventId && isValidBridgeId(eventId) ? eventId : "open" } : undefined;
   const project = await projectToCheck(eventId);
   if (!project) return Response.json({ error: "No project to check: open WeDo Claude Motion in a browser first" }, { status: 409 });
   try {
-    const report = await runQualityCheck(project, new URL(request.url).origin);
+    const report = await runQualityCheck(project, new URL(request.url).origin, { review });
     return Response.json({ report, text: formatReport(report) });
   } catch (error) {
     if (error instanceof ExportRequestError) return Response.json({ error: error.message }, { status: error.status });

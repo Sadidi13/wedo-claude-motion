@@ -142,10 +142,15 @@ export function videoLayerTemplate(timing: ClipTiming, ref: string, name: string
 }
 
 export interface AudioTemplateOptions {
-  /** project asset path, or a built-in sound in `sfx` */
+  /** project asset path, a real recorded sound in `sound`, or a built-in sound in `sfx` */
   src?: string;
+  sound?: string;
   sfx?: string;
   start: number;
+  /** seconds skipped into the sound */
+  from?: number;
+  /** seconds of fade at the clip's end */
+  fadeOut?: number;
   /** omitted: the clip plays its own length */
   end?: number;
   name: string;
@@ -156,11 +161,17 @@ export interface AudioTemplateOptions {
 /** One <Audio> clip layer (a direct child of the Stage). */
 export function audioLayerTemplate(options: AudioTemplateOptions): string {
   const attrs = [
-    options.src ? `src="${escapeAttr(options.src)}"` : `sfx="${escapeAttr(options.sfx ?? "")}"`,
+    options.src
+      ? `src="${escapeAttr(options.src)}"`
+      : options.sound
+        ? `sound="${escapeAttr(options.sound)}"`
+        : `sfx="${escapeAttr(options.sfx ?? "")}"`,
     `start={${options.start}}`,
     options.end !== undefined ? `end={${options.end}}` : "",
+    options.from ? `from={${options.from}}` : "",
     options.volume !== undefined && options.volume !== 1 ? `volume={${options.volume}}` : "",
     options.loop ? "loop" : "",
+    options.fadeOut ? `fadeOut={${options.fadeOut}}` : "",
     `data-layer-name="${escapeAttr(options.name)}"`,
   ].filter(Boolean);
   return `<Audio ${attrs.join(" ")} />`;

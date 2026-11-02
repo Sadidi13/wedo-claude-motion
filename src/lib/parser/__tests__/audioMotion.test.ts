@@ -41,6 +41,14 @@ describe("<Audio> layers", () => {
     expect(scene.byId.bed.range).toEqual({ start: 2, end: 8 });
   });
 
+  it("last as long as a real recorded sound without end, less what `from` skips", () => {
+    const real = '<Audio sound="whoosh-fast" start={4} from={0.5} data-layer-id="real" />';
+    const parsed = parseScene(SOURCE.replace("<Sprite start={1}", `${real}\n      <Sprite start={1}`));
+    expect(parsed.byId.real.range.start).toBe(4);
+    expect(parsed.byId.real.range.end).toBeCloseTo(4 + 2.13 - 0.5, 6);
+    expect(parsed.byId.real.audio).toMatchObject({ sound: "whoosh-fast", from: 0.5, loop: false });
+  });
+
   it("are retimed from the timeline like Sprites", () => {
     const next = setLayerTiming(SOURCE, "whoosh", { start: 3, end: 3.5 });
     expect(next).toContain('<Audio sfx="whoosh" start={3} end={3.5} data-layer-id="whoosh" />');

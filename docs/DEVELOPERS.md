@@ -114,7 +114,8 @@ export default function Scene() {
 | `MOTION_STUDIO_CHROMIUM_NO_SANDBOX` | `1` turns Chromium's sandbox off for export (only for containers that need it) |
 | `MOTION_STUDIO_ALLOW_REMOTE` | `1` lets the CLI send the bridge token to a non-local http server (not recommended) |
 | `MOTION_STUDIO_EXPORT_WORKERS` | pages rendering an export in parallel (default: half the logical cores, 2 to 8) |
-| `MOTION_STUDIO_SFX_DIR` | cache of the rendered built-in sounds, default `$TMPDIR/motion-studio/sfx-v1` |
+| `MOTION_STUDIO_SFX_DIR` | cache of the rendered synthesized sounds, default `$TMPDIR/motion-studio/sfx-v1` |
+| `MOTION_STUDIO_SOUNDS_DIR` | cache of the downloaded sound bank (docs/AUDIO.md), default `<media library>/sounds` |
 | `WEDO_CLAUDE_MOTION_DIR` | where the Claude Code plugin's launcher finds the app (else `~/.wedo-claude-motion/location`, then `~/wedo-claude-motion`) |
 
 Installer options (Windows, `scripts/install-windows.ps1`): `WEDO_INSTALL_DIR`, `WEDO_NO_SHORTCUTS=1`,
@@ -163,7 +164,7 @@ HTML file. See [`SECURITY.md`](../SECURITY.md) for the full threat model.
 
 - [STORYBOARD.md](STORYBOARD.md): style frames, storyboard and approval before every new video; the
   style library; reference images and videos.
-- [AUDIO.md](AUDIO.md): `<Audio>` layers, the built-in sounds, preview sync and the export mix.
+- [AUDIO.md](AUDIO.md): `<Audio>` layers, the sound bank (CC0 recordings and music beds, with credits), preview sync and the export mix.
 - [TRANSFORM.md](TRANSFORM.md): on-canvas move / scale / rotate, keyframes (`data-motion`), frame comments.
 - [QUALITY.md](QUALITY.md): the local quality check.
 - [VERSIONS.md](VERSIONS.md): version history.

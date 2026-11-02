@@ -6,12 +6,13 @@
  * kind icon · name (double-click to rename) · timing badge · eye · lock, with
  * hover actions and a right-click menu for duplicate / delete / bring
  * forward / send backward / wrap in Sprite. The header inserts Text / Image /
- * Shape / 3D model (.glb) layers and Sound (an audio file or a built-in sound
- * effect) at the playhead.
+ * Shape / 3D model (.glb) layers and Sound (an audio file, a real recorded sound
+ * from the sound library, or a built-in looping bed) at the playhead.
  */
 import {
   ArrowDown,
   ArrowUp,
+  AudioLines,
   Box,
   Boxes,
   ChevronDown,
@@ -49,6 +50,7 @@ import { Button } from "./ui/Button";
 import { ContextMenu, type ContextMenuItem } from "./ui/ContextMenu";
 import { cx } from "./ui/cx";
 import { IconButton } from "./ui/IconButton";
+import { SoundLibraryDialog } from "./SoundLibraryDialog";
 
 const KIND_ICON: Record<LayerKind, LucideIcon> = {
   sprite: Clapperboard,
@@ -245,6 +247,7 @@ export function LayersPanel() {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [shapeMenu, setShapeMenu] = useState<{ x: number; y: number } | null>(null);
   const [soundMenu, setSoundMenu] = useState<{ x: number; y: number } | null>(null);
+  const [soundLibrary, setSoundLibrary] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const modelInputRef = useRef<HTMLInputElement>(null);
@@ -303,7 +306,7 @@ export function LayersPanel() {
           size="sm"
           variant="ghost"
           icon={<Music size={14} />}
-          title="Add sound at the playhead: an audio file or a built-in sound effect"
+          title="Add sound at the playhead: an audio file, a real recorded sound effect or a music bed"
           disabled={disabled}
           onClick={(event) => {
             const rect = event.currentTarget.getBoundingClientRect();
@@ -399,15 +402,20 @@ export function LayersPanel() {
           onClose={closeSoundMenu}
           items={[
             { label: "Audio file…", icon: <Upload size={14} />, onSelect: () => audioInputRef.current?.click() },
-            ...Object.entries(SFX).map(([name, sound], index) => ({
-              label: `${sound.label} · ${sound.duration < 1 ? sound.duration.toFixed(1) : Number(sound.duration.toFixed(1))}s`,
-              icon: sound.loop ? <Repeat size={14} /> : <Volume2 size={14} />,
-              onSelect: () => store.addSfxLayer(name),
-              separator: index === 0,
-            })),
+            { label: "Sound library…", icon: <AudioLines size={14} />, onSelect: () => setSoundLibrary(true) },
+            // The synthesized one-shots gave way to the real recordings; their looping beds stay.
+            ...Object.entries(SFX)
+              .filter(([, sound]) => sound.loop)
+              .map(([name, sound], index) => ({
+                label: `${sound.label} · loop`,
+                icon: <Repeat size={14} />,
+                onSelect: () => store.addSfxLayer(name),
+                separator: index === 0,
+              })),
           ]}
         />
       )}
+      {soundLibrary && <SoundLibraryDialog onClose={() => setSoundLibrary(false)} />}
     </aside>
   );
 }

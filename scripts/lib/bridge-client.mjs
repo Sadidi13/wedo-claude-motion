@@ -189,9 +189,11 @@ export async function getContract() {
 /**
  * The quality check (docs/QUALITY.md) of the scene a pushed event made (`eventId`), or of the project
  * open in the editor. Resolves with `{ report, text }`. Rendering takes a few seconds to a minute.
+ * With `review`, the report also lists contact sheets of the frames (`report.review.sheets[].file`).
  */
-export async function checkQuality(eventId) {
-  const result = await request("POST", "/api/bridge/qa", { body: eventId ? { eventId } : {}, auth: true });
+export async function checkQuality(eventId, { review = false } = {}) {
+  const body = { ...(eventId ? { eventId } : {}), ...(review ? { review: true } : {}) };
+  const result = await request("POST", "/api/bridge/qa", { body, auth: true });
   if (result.status !== 200) throw failure(result, "quality check");
   return result.json;
 }

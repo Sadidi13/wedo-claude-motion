@@ -15,6 +15,7 @@
  * that final turn so they can iterate on the same layer.
  */
 import type Anthropic from "@anthropic-ai/sdk";
+import { realMusicMarkdown, realSoundsMarkdown } from "@/lib/audio/realSounds";
 import { getLayerSource } from "@/lib/parser";
 import type { AiEditRequest, AiScope, LayerNode, ParsedScene, ProjectFile, StageMeta } from "@/lib/types";
 
@@ -47,7 +48,7 @@ export const SYSTEM_PROMPT = `You are the motion-design engine inside Motion Stu
 | \`animate({ from, to, start, end, ease? })\` | \`(t: number) => number\` | single tween, default \`Easing.easeInOutCubic\` |
 | \`clamp(v, min, max)\`, \`lerp(a, b, t)\` | helpers | |
 | \`Three3D\` | \`({ setup?, render?, width?, height?, camera?, textures?, models?, environment?, bloom?, antialias=true, autoRender=true, ...data-* })\` | one three.js scene drawn on one WebGL canvas, as ONE layer (stage-sized by default); see section 3 |
-| \`Audio\` | \`({ src?, sfx?, start=0, end?, from=0, volume=1, fadeIn=0, fadeOut=0, loop=false, ...data-* })\` | one sound clip as a layer (draws nothing); see section 5 |
+| \`Audio\` | \`({ src?, sound?, sfx?, start=0, end?, from=0, volume=1, fadeIn=0, fadeOut=0, loop=false, ...data-* })\` | one sound clip as a layer (draws nothing); see section 5 |
 | \`Video\` | \`({ src, from=0, volume=1, muted=false, fit="cover", style, ...data-* })\` | footage from the media library (\`src="media/<id>.mp4"\`) inside a Sprite; fills its parent; exported frame-exact with its sound; see section 5 |
 | \`useGsapTimeline(build, deps?)\` | \`((tl, scope) => void, deps) => ref\` | builds one paused GSAP timeline scoped to the element \`ref\` is attached to, seeked to the Sprite's local time every frame; see section 4 |
 
@@ -170,11 +171,14 @@ export default function Scene() {
 
 Sound is part of the scene: each clip is one \`<Audio>\` layer, a direct child of \`<Stage>\` next to the Sprites, with a \`data-layer-name\`. The designer moves and trims it on the timeline like a Sprite, and exports mix it into the video. Import \`Audio\` from \`"./animations.jsx"\` with the other runtime exports.
 
-- A built-in sound: \`<Audio sfx="whoosh" start={1.2} data-layer-name="Whoosh" />\` (it plays its own length). Names: whoosh, swoosh, pop, click, tick, typing, ding, chime, success, notification, sparkle, impact, bass-hit, riser, drop, glitch, heartbeat, shutter, and the looping beds beat-90, beat-120, pad. Beds loop under a stretch: \`<Audio sfx="pad" start={0} end={8} loop volume={0.4} fadeOut={1} data-layer-name="Music" />\`.
+- A sound effect: a real recording from the sound bank (CC0, freesound.org; the editor downloads each one the first time it is used): \`<Audio sound="whoosh-fast" start={0.42} data-layer-name="Whoosh" />\`. It plays its own length. Every effect hits a fixed time after its start (listed below): start it that long before the moment it belongs to, so the hit lands on the cut, the slam or the reveal (a whoosh-fast for a cut at 2.2 s starts at 2.2 - 1.78 = 0.42). Use these for every effect; the old synthesized \`sfx\` sounds are kept only so older scenes still play. The effects:
+${realSoundsMarkdown()}
+- Music: the designer's own music from the media library when there is one; otherwise a bed from the bank under the whole video: \`<Audio sound="music-corporate" start={0} end={12} loop volume={0.35} fadeIn={0.4} fadeOut={1.5} data-layer-name="Music" />\`. Only a bed that loops seamlessly may take \`loop\` (a video longer than another bed would hear it restart: pick one that loops, or one long enough). Beats fall at first beat + n x 60 / BPM seconds from the clip's start (+ its \`start\` on the stage): put cuts, slams and big moves on beats, and the biggest ones on the first beat of a bar (every 4 beats). The beds:
+${realMusicMarkdown()}
 - A project audio file: \`<Audio src="assets/music.mp3" start={0} end={12} from={3} volume={0.8} fadeIn={0.5} fadeOut={1.5} data-layer-name="Music" />\`. Only reference audio files that exist in the project.
 - A sound from the media library (a voice-over, the designer's music): \`<Audio src="media/p0q1r2s3t4u5.mp3" start={0} data-layer-name="Voice-over" />\`, with the reference you were given. A voice-over sets the video's timing: place text and cuts on what is said (the brief gives the transcript with timings when there is one).
 - \`start\` / \`end\` are stage seconds and numeric literals. \`from\` skips into the file. \`volume\` is 0-1. Keep music under voice and effects (music 0.3-0.6, effects 0.6-1).
-- Put effects on the moments they belong to (a whoosh on a fast move, a pop when something appears, an impact when a title lands, a ding on a reveal). Do not stack effects on every cut; a few well-timed ones read better.
+- Put effects on the moments they belong to (a whoosh on a fast move, a pop when something appears, an impact when a title lands, a ding on a reveal). Do not stack effects on every cut; a few well-timed ones read better. An effect whose hit misses its picture by more than a frame reads as a mistake.
 
 Footage (a talking head, B-roll, a screen recording) is a \`<Video>\` inside a \`<Sprite>\`: the Sprite places it on the timeline, the Video plays the file from \`from\` seconds at the Sprite's start. Import \`Video\` from \`"./animations.jsx"\`.
 
@@ -206,6 +210,11 @@ Images and fonts from the media library load by reference: \`<img src="media/a1b
 - Layout: keep everything inside safe margins of at least 5% of the canvas on every side; align to a simple grid; body text >= 24 px and titles >= 48 px at 1080p (scale proportionally for other canvas sizes).
 - Colour: a limited palette (2-3 brand colours plus neutrals), text contrast >= 4.5:1 against its background, consistent corner radii and shadows.
 - Prefer transform-based motion (translate / scale / opacity) over layout-affecting properties.
+- Weight: nothing starts or stops at full speed. Key elements (titles, cards, the product) overshoot by 2-6% and settle (\`easeOutBack\` with a small amount, or a spring you compute from time); secondary elements follow 2-4 frames later (overlapping action).
+- Motion blur: when something crosses more than about a tenth of the frame in under 0.2 s, blur it along its path for those frames (an inline SVG \`<filter>\` with \`<feGaussianBlur stdDeviation="12 0" />\` scaled to the speed, or two trailing copies at 30% and 15% opacity), so fast moves read as motion, not as jumps.
+- Life: keep every shot moving a little (a slow push of 2-4% scale, a drift, a parallax between layers); a frame that holds dead still for more than a second looks broken in a reel. Shake only on impacts: a few frames, decaying.
+- Rhythm: in a reel something changes every 0.6-1.5 s (a new word, a cut, a move), on the music's beats when there is music; let the end hold for a beat longer.
+- When there is a reference, match it before adding ideas of your own: the same type size relative to the frame, the same density, the same palette and the same pace of cuts.
 - Persian (and Arabic) text: \`dir="rtl"\` on its element and right-aligned layouts; a clean Persian sans or display face (the designer's font file, Vazirmatn, Peyda, IRANYekan-style); never Nastaliq or other calligraphic faces for short words, captions or UI-like text (they read as decoration, and short words such as «از» or «مدل» turn illegible); no \`letter-spacing\` and no \`text-transform\` on Persian (they break the joined letters); line-height at least 1.4; Persian digits (۰-۹) in Persian text; the zero-width non-joiner (نیم‌فاصله) where the language needs it (می‌شود، بی‌نظیر). Animate Persian by word or by line, not by letter (split letters lose their joined forms).
 
 # 8. Output format

@@ -97,7 +97,7 @@ Rules (the AI system prompt and the importer both enforce / assume these):
 | `animate({ from, to, start, end, ease? })` | `(t:number)=>number` | single tween, default `Easing.easeInOutCubic` |
 | `clamp(v, min, max)`, `lerp(a, b, t)` | helpers | |
 | `Three3D` | `({ setup?, render?, width?, height?, camera?, textures?, models?, environment?, bloom?, antialias=true, autoRender=true, style, ...data-* })` | one three.js scene on one WebGL canvas = **one layer** (`src/runtime/three.tsx`). Renders `<div data-three3d style="position:absolute;left:0;top:0;width;height">` (default size: the Stage) carrying the `data-*` props, with the canvas inside. See "3D scenes" below. |
-| `Audio` | `({ src?, sfx?, start=0, end?, from=0, volume=1, fadeIn=0, fadeOut=0, loop=false, ...data-* })` | one sound clip = **one layer** (`src/runtime/audio.tsx`). Renders a hidden marker `<span data-audio>` with the `data-*` props. Plays in sync with the editor's playback; records itself for the export mix in render mode. `sfx` names a built-in sound (`src/lib/audio/sfx.ts`). See docs/AUDIO.md. |
+| `Audio` | `({ src?, sound?, sfx?, start=0, end?, from=0, volume=1, fadeIn=0, fadeOut=0, loop=false, ...data-* })` | one sound clip = **one layer** (`src/runtime/audio.tsx`). Renders a hidden marker `<span data-audio>` with the `data-*` props. Plays in sync with the editor's playback; records itself for the export mix in render mode. `sound` names a real recording of the sound bank (`src/lib/audio/realSounds.ts`), `sfx` an older synthesized sound (`src/lib/audio/sfx.ts`). See docs/AUDIO.md. |
 | `useGsapTimeline` | `(build: (tl, scope) => void, deps = []) => RefObject` | one paused GSAP timeline scoped to the element the returned ref is attached to, seeked to the Sprite's local time (stage time outside a Sprite) on every render (`src/runtime/gsap.tsx`). See "GSAP" below. |
 
 Globals the runtime installs on `window` when a Stage mounts:
@@ -290,7 +290,7 @@ A text layer whose child is `{TEXT.key}` takes that value for its name and previ
 Layer naming rule (`LayerNode.name`): `data-layer-name` > for text elements the first 24 chars of text
 > `<Tag>`; Sprite with a single element child may borrow that child's text for the preview.
 `LayerNode.kind`: `Sprite` ⇒ `sprite`; `img|Image|video` ⇒ `image`; `svg|path|circle|rect|...` ⇒ `shape`;
-`Audio` ⇒ `audio` (timed like a Sprite; without `end` a built-in sound lasts its own length;
+`Audio` ⇒ `audio` (timed like a Sprite; without `end` a bank or synthesized sound lasts its own length, less `from`;
 `LayerNode.audio` holds its literal props); `Three3D|canvas` ⇒ `canvas` (one drawn layer: the meshes inside a 3D scene are not layers, and JSX in
 its `setup` / `render` props is a prop value, not a sub-layer); capitalised tag ⇒ `component`; element whose children are only text/expressions ⇒ `text`;
 element with element children ⇒ `group`; else `element`.

@@ -46,3 +46,17 @@ After `new` or `edit`, `node scripts/motion-bridge.mjs qa` checks what Claude ju
 the pushed event, or the project after the editor shared the edited version
 (`POST /api/bridge/qa`, token). The chat connector has `check_quality`. The skill and the autopilot
 run it after building a video and fix real problems before handing it over.
+
+## Review after a build
+
+With `{ "review": true }` the check also saves contact sheets of the rendered frames in the bridge
+folder (`reviews/<event>-1.jpg`, …): 12 frames spread evenly over the video, six to a sheet, each
+labelled with its time, at the size Claude reads an image without shrinking it (`reviewLayout`).
+
+After it builds a video, the autopilot runs this check and one more Claude run (effort xhigh) that
+looks at the sheets next to the designer's reference images (when the storyboard has them), with the
+style spec and the check's findings, the way a senior motion designer reviews a cut: likeness to the
+reference, finish, motion (easing with weight, overshoot, motion blur, nothing frozen) and sound
+(each effect's hit on its moment). It fixes at most five things, or answers `{"ok": true}` when the
+video already meets the bar. The fix arrives in the editor as an edit named "Review after the build",
+so the designer can undo it.

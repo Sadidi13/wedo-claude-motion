@@ -124,6 +124,15 @@ describe("audioLayerTemplate", () => {
     const { source, id } = insertLayer(ensureRuntimeImport(SCENE, "Audio"), null, file);
     expect(parseScene(source).byId[id]).toMatchObject({ kind: "audio", name: 'Music "final"', range: { start: 0, end: 8 } });
   });
+
+  it("writes a real sound with its offset, and a bed that fades out", () => {
+    expect(audioLayerTemplate({ sound: "whoosh-fast", start: 0, from: 0.4, name: "Whoosh fast" })).toBe(
+      '<Audio sound="whoosh-fast" start={0} from={0.4} data-layer-name="Whoosh fast" />',
+    );
+    expect(audioLayerTemplate({ sound: "music-corporate", start: 1, end: 12, loop: true, volume: 0.4, fadeOut: 1, name: "Music corporate" })).toBe(
+      '<Audio sound="music-corporate" start={1} end={12} volume={0.4} loop fadeOut={1} data-layer-name="Music corporate" />',
+    );
+  });
 });
 
 describe("ensureRuntimeImport", () => {

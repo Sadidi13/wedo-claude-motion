@@ -6,9 +6,11 @@
  *   <Audio src="assets/music.mp3" start={0} end={8} volume={0.8} fadeOut={1.5} data-layer-name="Music" />
  *   <Audio sfx="whoosh" start={1.2} data-layer-name="Whoosh" />
  *
- *   src / sfx   a project audio file (the loader turns the path into a data: URL), a sound
- *               from the media library (`media/<id>.mp3`, played from /api/media/<id>/file)
- *               or a built-in sound (src/lib/audio/sfx.ts)
+ *   src / sound / sfx
+ *               a project audio file (the loader turns the path into a data: URL), a sound
+ *               from the media library (`media/<id>.mp3`, played from /api/media/<id>/file),
+ *               a real recorded sound by name (`sound="whoosh-fast"`, src/lib/audio/realSounds.ts)
+ *               or a built-in synthesized one (src/lib/audio/sfx.ts)
  *   start, end  stage seconds; without `end` the clip plays to its own length
  *               (or, looping, to the end of the stage)
  *   from        offset into the file, seconds
@@ -25,16 +27,18 @@
  */
 
 import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, type HTMLAttributes } from "react";
+import { isRealSoundName, realSoundDuration, realSoundUrl } from "@/lib/audio/realSounds";
 import { isSfxName, sfxDuration } from "@/lib/audio/sfx";
 import { mediaIdOf, mediaUrls } from "@/lib/media";
 import { useClock, type ClockState } from "./clock";
 import { clamp } from "./easing";
 import { motionWindow } from "./globals";
 
-/** One clip as the exporter sees it. `src` is a data: URL (or a URL); `sfx` a built-in sound. */
+/** One clip as the exporter sees it. `src` is a data: URL (or a URL); `sound` a real sound; `sfx` a built-in sound. */
 export interface AudioClip {
   key: string;
   src?: string;
+  sound?: string;
   sfx?: string;
   start: number;
   /** null: to the clip's own end (or the stage end when looping) */
@@ -48,6 +52,7 @@ export interface AudioClip {
 
 export interface AudioProps extends Omit<HTMLAttributes<HTMLSpanElement>, "children"> {
   src?: string;
+  sound?: string;
   sfx?: string;
   start?: number;
   end?: number;
@@ -156,6 +161,7 @@ export function fadeGain(t: number, start: number, end: number, fadeIn: number, 
 
 export function Audio({
   src,
+  sound,
   sfx,
   start = 0,
   end,
@@ -171,7 +177,7 @@ export function Audio({
   const clockPlaying = useClock(selectClockPlaying);
   const { playing: editorPlaying, muted } = useAudioPlayback();
   const elementRef = useRef<HTMLAudioElement | null>(null);
-  const knownLength = sfx && isSfxName(sfx) ? sfxDuration(sfx) : undefined;
+  const knownLength = isRealSoundName(sound) ? realSoundDuration(sound) : sfx && isSfxName(sfx) ? sfxDuration(sfx) : undefined;
   const layerId = typeof rest["data-layer-id"] === "string" ? rest["data-layer-id"] : undefined;
   // A hidden layer (the editor's eye toggle) is silent and left out of exports.
   const hidden = rest["data-hidden"] === true || rest["data-hidden"] === "true";
@@ -179,11 +185,11 @@ export function Audio({
   // Record the clip for the exporter on every render (props can change).
   useLayoutEffect(() => {
     installGlobal();
-    if (hidden || (!src && !(sfx && isSfxName(sfx)))) return;
-    const key = layerId ?? `${sfx ?? src}|${start}|${end ?? ""}|${from}`;
+    if (hidden || (!src && !isRealSoundName(sound) && !(sfx && isSfxName(sfx)))) return;
+    const key = layerId ?? `${sound ?? sfx ?? src}|${start}|${end ?? ""}|${from}`;
     seen.set(key, {
       key,
-      ...(src ? { src } : { sfx }),
+      ...(src ? { src } : isRealSoundName(sound) ? { sound } : { sfx }),
       start,
       end: end ?? null,
       from,
@@ -198,7 +204,9 @@ export function Audio({
   useEffect(() => {
     if (isRenderMode()) return;
     const mediaId = mediaIdOf(src);
-    const url = mediaId ? mediaUrls.file(mediaId) : (src ?? (sfx && isSfxName(sfx) ? sfxUrl(sfx) : null));
+    const url = mediaId
+      ? mediaUrls.file(mediaId)
+      : (src ?? (isRealSoundName(sound) ? realSoundUrl(sound) : sfx && isSfxName(sfx) ? sfxUrl(sfx) : null));
     if (!url) return;
     const element = new window.Audio(url);
     element.preload = "auto";
@@ -210,7 +218,7 @@ export function Audio({
       element.load();
       elementRef.current = null;
     };
-  }, [src, sfx, loop]);
+  }, [src, sound, sfx, loop]);
 
   // Follow the playhead.
   useEffect(() => {

@@ -35,6 +35,15 @@ export interface QaReport {
   duration: number;
   frames: number;
   issues: QaIssue[];
+  /** contact sheets of the rendered frames, when a visual review asked for them (the autopilot, after a build) */
+  review?: QaReview;
+}
+
+/** Sheets of evenly spread frames, left to right, top to bottom, each labelled with its time. */
+export interface QaReview {
+  columns: number;
+  rows: number;
+  sheets: { file: string; times: number[] }[];
 }
 
 /** One visible run of text at one sampled time. */
