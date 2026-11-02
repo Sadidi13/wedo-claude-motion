@@ -36,6 +36,14 @@ export async function loadMaterialInfo(board: Board): Promise<MaterialInfo> {
   return info;
 }
 
+/**
+ * Builds of videos longer than this are asked for compact code: an 81-second reel written out
+ * element by element came back cut off three times (twice at Claude Code's default reply limit,
+ * once past 64k tokens).
+ */
+const LONG_VIDEO_SECONDS = 30;
+const COMPACT_CODE_CHARS = 60_000;
+
 const STEP_LABEL: Record<BoardAction, string> = {
   new: "propose style frames for a new video",
   restyle: "propose different style frames",
@@ -161,6 +169,11 @@ function stepTask(action: BoardAction, board: Board): string[] {
     case "approve":
       return [
         "The designer approved the storyboard below. Build the complete video in the chosen style, shot by shot at the storyboard's times, with the sound cues as <Audio> layers (section 9, step 4).",
+        ...(board.meta.duration > LONG_VIDEO_SECONDS
+          ? [
+              `This video is ${board.meta.duration} s long, so the whole scene must fit one reply: keep the code compact (well under ${COMPACT_CODE_CHARS.toLocaleString("en")} characters). One reusable component per kind of graphic (a card, a pill, a caption group), captions as data (TEXT.lines plus one array of word times, read by a single Caption component), each shot and caption a one-line <Sprite>, shared style objects instead of repeating inline styles, and no comments beyond a few headings. Think about the design briefly, then write.`,
+            ]
+          : []),
       ];
   }
 }

@@ -103,7 +103,14 @@ describe("storyboard flow from the editor", () => {
     await boardAction(started.id, { action: "approve" });
     const step3 = await claimNextRequest(new Date(), "headless");
     expect(step3?.board?.action).toBe("approve");
-    expect(buildBoardBrief(step3!, (await readBoard(started.id))!, "headless")).toContain('{"summary": "...", "code"');
+    const approved = (await readBoard(started.id))!;
+    const buildBrief = buildBoardBrief(step3!, approved, "headless");
+    expect(buildBrief).toContain('{"summary": "...", "code"');
+    expect(buildBrief).not.toContain("must fit one reply");
+    // A long video's build is asked for compact code, so the whole scene fits one reply.
+    const longBrief = buildBoardBrief(step3!, { ...approved, meta: { ...approved.meta, duration: 81 } }, "headless");
+    expect(longBrief).toContain("This video is 81 s long, so the whole scene must fit one reply");
+    expect(longBrief).toContain("well under 60,000 characters");
     const built = await pushNewScene({ type: "project", name: "Cafe", summary: "Made it", code: GOOD_SCENE_CODE, boardId: started.id });
     expect(built.ok).toBe(true);
     if (!built.ok || built.event.type !== "project") throw new Error("expected a project event");

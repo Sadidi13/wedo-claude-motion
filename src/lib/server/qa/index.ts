@@ -198,7 +198,7 @@ function collectTexts(): PageText[] {
       opacity,
       rtlProblem: arabic.test(text) && style.direction !== "rtl",
       clipped: clips && (node.scrollWidth > node.clientWidth + 2 || node.scrollHeight > node.clientHeight + 2),
-      color: style.color,
+      color: node instanceof SVGElement ? style.fill : style.color,
     });
   }
   return out;
@@ -289,8 +289,10 @@ async function analysePixels(input: PixelInput): Promise<PixelResult> {
   return { spread, small: thumb, contrasts };
 }
 
+// SVG text paints with fill and stroke, not color: hidden too, or its contrast is measured against itself.
 const HIDE_TEXT_CSS =
-  "[data-stage] * { color: transparent !important; text-shadow: none !important; -webkit-text-stroke-color: transparent !important; caret-color: transparent !important; }";
+  "[data-stage] * { color: transparent !important; text-shadow: none !important; -webkit-text-stroke-color: transparent !important; caret-color: transparent !important; }" +
+  " [data-stage] svg text, [data-stage] svg tspan { fill: transparent !important; stroke: transparent !important; }";
 
 /**
  * Render the project headlessly and report what a designer should fix. One check at a time. With

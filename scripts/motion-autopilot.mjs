@@ -198,9 +198,10 @@ function claudeCommand() {
 /** A clean environment: no variables of a Claude Code session this happens to be started from. */
 /**
  * Room for a whole scene in one reply: the build of a long video runs past Claude Code's default
- * output limit, and a reply cut off there is not valid JSON.
+ * output limit, and a reply cut off there is not valid JSON. An 81-second reel at effort xhigh went
+ * past 64k (thinking and code share the limit); the run's time limit bounds it as well.
  */
-const MAX_OUTPUT_TOKENS = 64_000;
+const MAX_OUTPUT_TOKENS = 128_000;
 
 function childEnv() {
   const env = { ...process.env };
