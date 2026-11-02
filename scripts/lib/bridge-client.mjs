@@ -203,15 +203,39 @@ export async function getStyleLibrary() {
   return result.text;
 }
 
+const MAX_REFERENCE_IMAGES = 20;
+const REFERENCE_IMAGE = /^r\d{1,2}\.(?:preview|(?:sheet|strip)-\d{2})\.jpg$/;
+
 /**
- * A board's reference previews as `{ ref, file }` with absolute paths (the server and these tools
- * share the bridge folder, so the files are read straight from it).
+ * The reference images Claude is shown, as `{ ref, file, label }` with absolute paths (the server
+ * and these tools share the bridge folder, so the files are read straight from it): per reference
+ * its contact sheets then its transition strips (or its one preview), at most 20. Same rule and
+ * labels as `referenceImageList` in src/lib/server/bridge/references.ts, which the briefs follow.
  */
 export function boardReferenceFiles(board) {
   if (!BOARD_ID.test(board.id)) return [];
-  return (board.references ?? [])
-    .filter((ref) => /^r\d{1,2}\.preview\.jpg$/.test(ref.preview))
-    .map((ref) => ({ ref, file: path.join(BRIDGE_DIR, "refs", board.id, ref.preview) }));
+  const list = [];
+  for (const ref of board.references ?? []) {
+    const images = ref.sheets?.length
+      ? [
+          ...ref.sheets.map((sheet, i) => ({
+            file: sheet.file,
+            label: sheet.times.length
+              ? `${ref.id} contact sheet ${i + 1}: ${sheet.columns}x${sheet.rows} frames from ${sheet.times[0]}s to ${sheet.times[sheet.times.length - 1]}s, left to right, top to bottom`
+              : `${ref.id}: the image`,
+          })),
+          ...(ref.strips ?? []).map((strip, i) => ({
+            file: strip.file,
+            label: `${ref.id} transition ${i + 1}: every frame from ${strip.times[0]}s to ${strip.times[strip.times.length - 1]}s around the cut at ${strip.cut}s, left to right, top to bottom`,
+          })),
+        ]
+      : [{ file: ref.preview, label: ref.kind === "video" ? `${ref.id}: contact sheet of the video` : `${ref.id}: the image` }];
+    for (const image of images) {
+      if (list.length >= MAX_REFERENCE_IMAGES) return list;
+      if (REFERENCE_IMAGE.test(image.file)) list.push({ ref, file: path.join(BRIDGE_DIR, "refs", board.id, image.file), label: image.label });
+    }
+  }
+  return list;
 }
 
 /** `{ project, syncedAt }` — the project open in the editor. */

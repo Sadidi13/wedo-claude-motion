@@ -13,7 +13,7 @@ import type { MediaMeta } from "@/lib/media";
 import type { Board, BoardAction, BoardMaterial, BoardReference, BridgeClient, MaterialRole } from "@/lib/types";
 import { readMeta } from "../media/store";
 import { readTranscript, type Transcript } from "../media/transcribe";
-import { referencesDir } from "./references";
+import { referenceImageList, referencesDir } from "./references";
 import type { BridgeRequestRecord } from "./store";
 
 /** What the brief says about the board's materials, read from the media library before it is built. */
@@ -70,8 +70,8 @@ function cliDelivery(record: BridgeRequestRecord, board: Board, deliverable: Boa
       '{ "styles": [ { "name": "…", "description": "…", "time": 2.5, "code": "style-1.jsx" } ] }',
       "```",
       "",
-      "(`code` paths are relative to the manifest. Optional: `title` for the board, and `stage` ({ width, height, duration, fps, background })",
-      "when the brief asks for another length or format than the video above.) Then run:",
+      "(`code` paths are relative to the manifest. Optional: `title` for the board, `stage` ({ width, height, duration, fps, background })",
+      "when the brief asks for another length or format than the video above, and `styleSpec` (Markdown) when there are references.) Then run:",
       "",
       "```bash",
       `node scripts/motion-bridge.mjs board-styles ${dir}/styles.json --board ${board.id}`,
@@ -114,7 +114,7 @@ function mcpDelivery(record: BridgeRequestRecord, board: Board, deliverable: Boa
   const decline = `If this is not a request for an animation, use \`decline_request\` with request_id "${record.id}" and a short reason.`;
   if (deliverable === "styles") {
     return [
-      `Answer with \`propose_styles\` and \`board_id\` "${board.id}" (styles: name, description, time, code; optional title, and width / height / duration / fps when the brief asks for another format).`,
+      `Answer with \`propose_styles\` and \`board_id\` "${board.id}" (styles: name, description, time, code; optional title, width / height / duration / fps when the brief asks for another format, and style_spec when there are references).`,
       decline,
       "",
     ];
@@ -132,7 +132,7 @@ function mcpDelivery(record: BridgeRequestRecord, board: Board, deliverable: Boa
 function headlessDelivery(deliverable: BoardDeliverable): string[] {
   const shapes: Record<BoardDeliverable, string> = {
     styles:
-      '{"title": "<short title>", "stage": {"width": 1080, "height": 1920, "duration": 8, "fps": 30} (only when the brief asks for another format than the video above), "styles": [{"name": "...", "description": "...", "time": 2.5, "code": "<complete entry file>"}]}',
+      '{"title": "<short title>", "stage": {"width": 1080, "height": 1920, "duration": 8, "fps": 30} (only when the brief asks for another format than the video above), "styleSpec": "<only with references: the style spec, Markdown>", "styles": [{"name": "...", "description": "...", "time": 2.5, "code": "<complete entry file>"}]}',
     storyboard:
       '{"notes": "...", "shots": [{"title": "...", "start": 0, "end": 2.5, "action": "...", "text": "...", "audio": "...", "code": "<optional complete entry file>", "time": 1}]}',
     scene: '{"summary": "...", "code": "<complete entry file>", "files": [optional {"path", "content"}]}',
@@ -165,24 +165,57 @@ function stepTask(action: BoardAction, board: Board): string[] {
   }
 }
 
-function describeReference(ref: BoardReference): string {
-  if (ref.kind === "image") return `- ${ref.id}: image "${ref.name}"`;
-  const times = (ref.frames ?? []).map((t) => `${t}s`).join(", ");
-  return `- ${ref.id}: video "${ref.name}" (${ref.duration ?? "?"}s), shown as a contact sheet of ${ref.frames?.length ?? 0} frames, left to right and top to bottom, at ${times}`;
+function describeReference(ref: BoardReference): string[] {
+  const a = ref.analysis;
+  if (ref.kind === "image") {
+    const look = a?.shots[0];
+    return [`- ${ref.id}: image "${ref.name}"${look ? ` (main colours ${look.colors.join(" ")}, brightness ${look.brightness})` : ""}`];
+  }
+  if (!a || !ref.sheets?.length) {
+    const times = (ref.frames ?? []).map((t) => `${t}s`).join(", ");
+    return [`- ${ref.id}: video "${ref.name}" (${ref.duration ?? "?"}s), shown as a contact sheet of ${ref.frames?.length ?? 0} frames, left to right and top to bottom, at ${times}`];
+  }
+  const step = ref.sheets[0].times.length > 1 ? Number((ref.sheets[0].times[1] - ref.sheets[0].times[0]).toFixed(3)) : 0;
+  const shots = a.shots.length ? Number(((ref.duration ?? 0) / a.shots.length).toFixed(2)) : 0;
+  const lines = [
+    `- ${ref.id}: video "${ref.name}" (${ref.duration ?? "?"}s, ${a.width}x${a.height}, ${a.fps} fps), seen in full: ${ref.sheets.length} contact sheets (a frame every ${step}s) and ${ref.strips?.length ?? 0} strips of every frame around cuts.`,
+    `  Cuts (${a.cuts.length}, average shot ${shots}s): ${a.cuts.map((t) => `${t}s`).join(", ")}. Cuts a frame or two apart are one transition (a flash, a glitch, a whip): read it in the strips.`,
+    `  Shots (main colours, brightness 0-1): ${a.shots.map((s) => `${s.start}-${s.end}s ${s.colors.slice(0, 3).join(" ")} (${s.brightness})`).join("; ")}.`,
+  ];
+  if (a.loudness) lines.push(`  Sound: ${a.loudness.integrated} LUFS integrated, true peak ${a.loudness.peak} dBFS.`);
+  return lines;
 }
 
 /** Where each kind of client sees the references (outside the untrusted part: these are our instructions). */
-function referenceAccess(board: Board, client: BridgeClient): string[] {
+function referenceAccess(board: Board, client: BridgeClient, deliverable: BoardDeliverable): string[] {
   const refs = board.references ?? [];
   if (!refs.length) return [];
   const lines = ["## References", "", 'The designer attached references for the look (section 9, "References"). Look at them first.', ""];
-  for (const ref of refs) {
-    lines.push(describeReference(ref));
-    if (client === "cli") lines.push(`  Open it with the Read tool: ${path.join(referencesDir(board.id), ref.preview)}`);
-  }
-  if (client === "mcp") lines.push("", `Call get_board_references with board_id "${board.id}" to see them.`);
-  if (client === "headless") lines.push("", "They are attached to this message as images, in this order.");
+  for (const ref of refs) lines.push(...describeReference(ref));
+  const images = referenceImageList(refs);
   lines.push("");
+  if (client === "cli") {
+    lines.push("Open each image with the Read tool:", "");
+    for (const image of images) lines.push(`- ${path.join(referencesDir(board.id), image.file)} (${image.label})`);
+  }
+  if (client === "mcp") lines.push(`Call get_board_references with board_id "${board.id}" to see them (${images.length} images).`);
+  if (client === "headless") {
+    lines.push(`They are attached to this message as ${images.length} images, in this order:`, "");
+    images.forEach((image, i) => lines.push(`${i + 1}. ${image.label}`));
+  }
+  lines.push("");
+  if (deliverable === "styles" && refs.some((ref) => ref.sheets?.length)) {
+    lines.push(
+      "### Style spec",
+      "",
+      "The references were seen in full. Before the frames, write what you read from them as `styleSpec` (Markdown, in the brief's language, 150-400 words): " +
+        "the formula (what happens in what order, how long each beat holds), the palette as hex values (start from the shot colours above, correct them by eye), " +
+        "type (roles, weights, case, tracking, the closest installed or library font), motion (easing, speeds, how text and graphics enter and leave), " +
+        "transitions (frame by frame, from the strips), camera and framing, texture and effects, and sound (pace, hits on cuts, loudness). " +
+        "Style frame A reproduces that spec exactly; the others develop it or offer a clear alternative. The spec goes to the storyboard and the build.",
+      "",
+    );
+  }
   return lines;
 }
 
@@ -302,6 +335,9 @@ function setupSections(board: Board, deliverable: BoardDeliverable, info: Materi
     }
   }
   if (board.script) parts.push("## Script and key messages (the designer's words; on-screen text comes from here)", "", board.script, "");
+  if (board.styleSpec && deliverable !== "styles") {
+    parts.push("## Style spec (read from the references with the style frames; the designer may have edited it)", "", board.styleSpec, "");
+  }
   const hints = (board.styleHints ?? []).map((name) => STYLE_LIBRARY.find((style) => style.name === name)).filter((style) => style !== undefined);
   if (hints.length && deliverable === "styles") {
     parts.push(
@@ -341,7 +377,7 @@ export function buildBoardBrief(record: BridgeRequestRecord, board: Board, clien
       : client === "mcp"
         ? mcpDelivery(record, board, deliverable)
         : cliDelivery(record, board, deliverable)),
-    ...(deliverable !== "scene" ? referenceAccess(board, client) : []),
+    ...(deliverable !== "scene" ? referenceAccess(board, client, deliverable) : []),
     ...(deliverable === "styles" ? [styleLibraryMarkdown().replace(/^# Style library/, "## Style library"), ""] : []),
     "## About the text below",
     "",

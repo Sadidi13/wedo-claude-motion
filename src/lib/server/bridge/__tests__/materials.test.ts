@@ -11,7 +11,18 @@ import type { MediaMeta } from "@/lib/media";
 import { writeJsonFile } from "../../jsonFile";
 import { mediaDir, writeMeta as storeMeta } from "../../media/store";
 import { parseTranscript, transcriptFile } from "../../media/transcribe";
-import { BridgeStateError, buildBoardBrief, claimNextRequest, loadMaterialInfo, readBoard, startBoard } from "..";
+import { GOOD_SCENE_CODE } from "@/lib/ai/__tests__/fixture";
+import {
+  BridgeStateError,
+  boardAction,
+  buildBoardBrief,
+  claimNextRequest,
+  loadMaterialInfo,
+  proposeStyles,
+  readBoard,
+  startBoard,
+  updateStyleSpec,
+} from "..";
 
 let root: string;
 
@@ -70,6 +81,27 @@ const WIZARD = {
   ],
   styleHints: ["Social captions", "Not a real style"],
 };
+
+describe("the style spec read from references", () => {
+  it("is kept with the style frames, editable, and handed to the storyboard and the build", async () => {
+    const board = await startBoard({ brief: "In the style of the reference", stage: { width: 1280, height: 720, duration: 8, fps: 30 } });
+    await claimNextRequest(new Date(), "headless");
+    const spec = "Formula: hook, three facts, call to action. Palette: #0b0b0f, #e8d8c0, #c62828.";
+    const styled = await proposeStyles({ boardId: board.id, styleSpec: spec, styles: [{ name: "A", description: "close match", time: 1, code: GOOD_SCENE_CODE }] });
+    expect(styled.styleSpec).toBe(spec);
+
+    const corrected = await updateStyleSpec(board.id, `${spec}\nType: condensed bold sans, all caps.`);
+    expect(corrected.styleSpec).toContain("condensed bold sans");
+    const chosen = await boardAction(board.id, { action: "choose-style", styleId: "a" });
+    const record = (await claimNextRequest(new Date(), "headless"))!;
+    const brief = buildBoardBrief(record, chosen, "headless");
+    expect(brief).toContain("## Style spec (read from the references with the style frames; the designer may have edited it)");
+    expect(brief).toContain("Type: condensed bold sans, all caps.");
+    expect(brief.indexOf("## About the text below")).toBeLessThan(brief.indexOf("## Style spec"));
+
+    expect((await updateStyleSpec(board.id, "   ")).styleSpec).toBeUndefined();
+  });
+});
 
 describe("a board started from the wizard", () => {
   it("keeps the setup, resolves the materials and drops unknown style names", async () => {

@@ -366,6 +366,19 @@ export interface BoardReference {
   frames?: number[];
   /** set when the file lives in the media library (the wizard uploads references there) */
   mediaId?: string;
+  /** the reference seen in full (media analysis): dense contact sheets of the whole video, r<n>.sheet-NN.jpg */
+  sheets?: { file: string; columns: number; rows: number; times: number[] }[];
+  /** every frame around the main cuts, r<n>.strip-NN.jpg */
+  strips?: { file: string; cut: number; times: number[] }[];
+  /** measured with ffmpeg: cuts, each shot's colours and brightness, loudness */
+  analysis?: {
+    fps: number;
+    width: number;
+    height: number;
+    cuts: number[];
+    shots: { start: number; end: number; colors: string[]; brightness: number }[];
+    loudness: { integrated: number; peak: number } | null;
+  };
 }
 
 /** What kind of video the New video wizard set up. */
@@ -432,6 +445,8 @@ export interface Board {
   materials?: BoardMaterial[];
   /** style-library directions the designer picked (names); empty: Claude chooses */
   styleHints?: string[];
+  /** the look Claude read from the references (Markdown, written with the style frames; the designer may edit it) */
+  styleSpec?: string;
   /** project made from this board, once built */
   projectId: string | null;
   /** the request queued for Claude about this board's current step, until Claude answers it */

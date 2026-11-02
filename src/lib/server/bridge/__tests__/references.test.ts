@@ -4,13 +4,17 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ffmpegPath } from "@/lib/server/export/ffmpeg";
-import { BridgeStateError, addBoardReferences, readReferenceFile, referenceFile, startBoard } from "..";
+import { mediaDir, mediaPaths, writeMeta } from "@/lib/server/media/store";
+import { BridgeStateError, addBoardReferences, readReferenceFile, referenceFile, referenceImageList, startBoard } from "..";
 import { saveReference, sheetLayout } from "../references";
+
+const CLIENT = path.resolve(import.meta.dirname, "../../../../../scripts/lib/bridge-client.mjs");
 
 let root: string;
 
@@ -49,6 +53,9 @@ describe("referenceFile", () => {
   it("only names a board's own reference files", () => {
     expect(referenceFile(BOARD, "r1.preview.jpg")).toBe(path.join(root, "refs", BOARD, "r1.preview.jpg"));
     expect(referenceFile(BOARD, "r2.mp4")).toBe(path.join(root, "refs", BOARD, "r2.mp4"));
+    expect(referenceFile(BOARD, "r1.sheet-03.jpg")).toBe(path.join(root, "refs", BOARD, "r1.sheet-03.jpg"));
+    expect(referenceFile(BOARD, "r1.strip-01.jpg")).toBe(path.join(root, "refs", BOARD, "r1.strip-01.jpg"));
+    expect(referenceFile(BOARD, "r1.sheet-1.jpg")).toBeNull();
     for (const name of ["../token", "r1.preview.jpg/..", "token", "r1.", "R1.mp4", "r123.mp4"]) expect(referenceFile(BOARD, name)).toBeNull();
     expect(() => referenceFile("../x", "r1.mp4")).toThrow(BridgeStateError);
   });
@@ -107,4 +114,44 @@ describe.skipIf(!existsSync(ffmpeg))("with the real ffmpeg", () => {
     const full = await rejection(addBoardReferences(board.id, [{ name: "a.png", dataUrl: image }, { name: "b.png", dataUrl: image }]));
     expect(full.message).toBe("A storyboard takes at most 4 references");
   }, 60_000);
+
+  it("sees a library video in full: sheets, strips around its cut, colours; the tools show the same images", async () => {
+    process.env.MOTION_STUDIO_MEDIA_DIR = path.join(root, "library");
+    try {
+      const id = "refclip00001";
+      await mkdir(mediaDir(id), { recursive: true });
+      execFileSync(ffmpeg, [
+        "-y", "-hide_banner", "-loglevel", "error",
+        "-f", "lavfi", "-i", "color=c=0xe6c828:s=320x568:r=25:d=1.5",
+        "-f", "lavfi", "-i", "color=c=0x141e78:s=320x568:r=25:d=1.5",
+        "-filter_complex", "[0][1]concat=n=2:v=1:a=0", "-pix_fmt", "yuv420p", mediaPaths.source(id, "mp4"),
+      ]);
+      await writeMeta({
+        id, kind: "video", name: "look.mp4", ext: "mp4", size: 1, state: "ready", duration: 3, sourceFps: 25, width: 320, height: 568,
+        hasAudio: false, frameRate: 25, frameCount: 75, frameWidth: 320, frameHeight: 568, createdAt: new Date().toISOString(),
+      });
+      const board = await startBoard({ brief: "In the style of the reference", referenceMedia: [id] });
+      const ref = board.references![0];
+      expect(ref).toMatchObject({ id: "r1", kind: "video", mediaId: id, preview: "r1.preview.jpg" });
+      // The first frame of the second shot (frames are 0.04 s apart at 25 fps).
+      expect(ref.analysis?.cuts).toEqual([1.52]);
+      // A bright yellow shot, then a dark blue one (the colours pass through YUV, so compare loosely).
+      const [first, second] = ref.analysis!.shots;
+      expect(first.brightness).toBeGreaterThan(0.6);
+      expect(second.brightness).toBeLessThan(0.2);
+      expect(parseInt(second.colors[0].slice(5, 7), 16)).toBeGreaterThan(parseInt(second.colors[0].slice(1, 3), 16));
+      expect(ref.sheets?.[0]).toMatchObject({ file: "r1.sheet-01.jpg", columns: 6, rows: 3 });
+      expect(ref.strips?.[0]).toMatchObject({ file: "r1.strip-01.jpg", cut: 1.52 });
+      expect((await readReferenceFile(board.id, "r1.strip-01.jpg"))?.type).toBe("image/jpeg");
+
+      const images = referenceImageList(board.references!);
+      expect(images.map((image) => image.file)).toEqual(["r1.sheet-01.jpg", "r1.sheet-02.jpg", "r1.strip-01.jpg"].slice(0, images.length));
+      expect(images.at(-1)?.file).toBe("r1.strip-01.jpg");
+      // The autopilot and the chat connector attach the same images with the same labels as the brief lists.
+      const client = (await import(pathToFileURL(CLIENT).href)) as { boardReferenceFiles: (board: unknown) => { file: string; label: string }[] };
+      expect(client.boardReferenceFiles(board).map((image) => [path.basename(image.file), image.label])).toEqual(images.map((image) => [image.file, image.label]));
+    } finally {
+      delete process.env.MOTION_STUDIO_MEDIA_DIR;
+    }
+  }, 120_000);
 });

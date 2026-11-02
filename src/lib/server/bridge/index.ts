@@ -41,9 +41,10 @@ export {
   proposeStyles,
   readBoard,
   startBoard,
+  updateStyleSpec,
 } from "./boards";
 export { buildBoardBrief, deliverableFor, loadMaterialInfo, type BoardDeliverable, type MaterialInfo } from "./boardBrief";
-export { readReferenceFile, referenceFile, referencesDir } from "./references";
+export { readReferenceFile, referenceFile, referenceImageList, referencesDir } from "./references";
 export {
   BridgePushSchema,
   BridgeResultSchema,

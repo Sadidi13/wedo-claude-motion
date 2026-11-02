@@ -75,6 +75,8 @@ export interface MediaMeta {
   fontWeight?: number;
   fontStyle?: "normal" | "italic";
   transcript?: TranscriptStatus;
+  /** a reference's measured look (contact sheets, cuts, colours, loudness; POST /api/media/<id>/analysis) */
+  analysis?: { state: "processing" | "ready" | "error"; error?: string };
   createdAt: string;
 }
 
@@ -91,6 +93,7 @@ export const mediaUrls = {
   /** the file as imported (sound, images and fonts load it directly) */
   file: (id: string) => `/api/media/${id}/file`,
   transcript: (id: string) => `/api/media/${id}/transcript`,
+  analysis: (id: string) => `/api/media/${id}/analysis`,
 };
 
 /** The export frame that shows source time `seconds` (clamped to the frames that exist). */

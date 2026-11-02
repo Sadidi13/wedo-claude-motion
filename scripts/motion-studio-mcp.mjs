@@ -127,6 +127,10 @@ const TOOLS = [
         duration: { type: "number", description: "Seconds." },
         fps: { type: "number" },
         background: { type: "string" },
+        style_spec: {
+          type: "string",
+          description: "With references: what you read from them (Markdown): formula, hex palette, type, motion, transitions, sound. Goes to the storyboard and the build.",
+        },
         styles: {
           type: "array",
           minItems: 1,
@@ -199,7 +203,7 @@ const TOOLS = [
     name: "get_board_references",
     title: "See a storyboard's references",
     description:
-      "The reference images the designer attached to a storyboard, as images (a video arrives as a contact sheet of its frames, left to right and top to bottom). Look at them before proposing style frames for that board.",
+      "The reference images the designer attached to a storyboard, as images: a video arrives seen in full, as dense contact sheets of its frames and strips of every frame around its cuts (each labelled with its times). Look at them before proposing style frames for that board; the step's brief has the measured cuts, colours and loudness.",
     inputSchema: { type: "object", properties: { board_id: { type: "string" } }, required: ["board_id"], additionalProperties: false },
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
@@ -497,6 +501,7 @@ const HANDLERS = {
       ...(typeof args.title === "string" && args.title.trim() ? { title: args.title } : {}),
       ...(typeof args.brief === "string" && args.brief.trim() ? { brief: args.brief } : {}),
       ...(Object.keys(stage).length ? { stage } : {}),
+      ...(typeof args.style_spec === "string" && args.style_spec.trim() ? { styleSpec: args.style_spec } : {}),
       styles: args.styles.map((style) => ({ ...style, files: optionalFiles(style) })),
     });
     const opened = await showBoard(board.id);
@@ -528,11 +533,8 @@ const HANDLERS = {
     const files = boardReferenceFiles(board);
     if (!files.length) return text(`Board "${board.title}" has no references.`);
     const content = [];
-    for (const { ref, file } of files) {
-      const label =
-        ref.kind === "video"
-          ? `${ref.id}: video "${ref.name}" (${ref.duration}s), contact sheet of ${ref.frames?.length ?? 0} frames at ${(ref.frames ?? []).join("s, ")}s`
-          : `${ref.id}: image "${ref.name}"`;
+    for (const { ref, file, label: shown } of files) {
+      const label = `${shown} ("${ref.name}")`;
       try {
         content.push({ type: "text", text: label });
         content.push({ type: "image", data: (await readFile(file)).toString("base64"), mimeType: "image/jpeg" });

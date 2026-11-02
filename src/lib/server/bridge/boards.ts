@@ -62,6 +62,7 @@ export const MAX_SHOTS = 16;
 export const MAX_BOARDS = 40;
 const MAX_BRIEF_CHARS = 8_000;
 const MAX_SCRIPT_CHARS = 20_000;
+const MAX_SPEC_CHARS = 12_000;
 export const MAX_MATERIALS = 24;
 const MAX_NOTE_CHARS = 4_000;
 const MAX_CODE_CHARS = 200_000;
@@ -211,6 +212,8 @@ export const BoardStylesSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   brief: z.string().trim().min(1).max(MAX_BRIEF_CHARS).optional(),
   stage: StageInputSchema.optional(),
+  /** what Claude read from the references (Markdown); it goes to the storyboard and the build */
+  styleSpec: z.string().trim().max(MAX_SPEC_CHARS).optional(),
   styles: z
     .array(
       z.object({
@@ -449,6 +452,7 @@ export function proposeStyles(input: BoardStylesInput, now = new Date()): Promis
       {
         ...board,
         styles,
+        ...(input.styleSpec ? { styleSpec: input.styleSpec } : {}),
         status: "choose-style",
         chosenStyleId: null,
         shots: [],
@@ -462,6 +466,18 @@ export function proposeStyles(input: BoardStylesInput, now = new Date()): Promis
     await pushEvent({ type: "board", boardId: saved.id, summary: `${styles.length} style frames for "${saved.title}"` }, now);
     if (!input.boardId) await pruneBoards();
     return saved;
+  });
+}
+
+/** The designer's corrections to the style spec (empty clears it); later steps read the corrected one. */
+export function updateStyleSpec(boardId: string, spec: string, now = new Date()): Promise<Board> {
+  return serial(async () => {
+    const board = await requireBoard(boardId);
+    if (board.status === "built") throw new BridgeStateError(`Board "${board.id}" is already built`, 409);
+    const text = spec.trim().slice(0, MAX_SPEC_CHARS);
+    const { styleSpec: _old, ...rest } = board;
+    void _old;
+    return saveBoard(text ? { ...rest, styleSpec: text } : rest, now);
   });
 }
 

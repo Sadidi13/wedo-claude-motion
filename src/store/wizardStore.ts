@@ -6,7 +6,7 @@
  */
 import { create } from "zustand";
 import { mediaKindForName, type MediaKind } from "@/lib/media";
-import { fetchMedia, startTranscript, uploadMedia, waitForReady, type UploadedMedia } from "@/lib/mediaClient";
+import { analyseReference, fetchMedia, importLink, startTranscript, uploadMedia, waitForReady, type UploadedMedia } from "@/lib/mediaClient";
 import type { Board, MaterialRole, VideoKind } from "@/lib/types";
 
 export type VideoFormat = "9:16" | "16:9" | "1:1" | "4:5";
@@ -57,6 +57,10 @@ export interface WizardFile {
   progress: number;
   error?: string;
   media?: UploadedMedia;
+  /** references: the reference seen in full on the server (contact sheets, cuts, colours) */
+  analysis?: { state: "processing" | "ready" | "error"; summary?: string; error?: string };
+  /** set when the file came from a link */
+  link?: string;
 }
 
 export type WizardStep = 0 | 1 | 2 | 3;
@@ -82,6 +86,8 @@ interface WizardState {
   setStep(step: WizardStep): void;
   set(patch: Partial<Pick<WizardState, "kind" | "format" | "duration" | "durationSet" | "language" | "brief" | "script">>): void;
   addFiles(files: File[], asReference?: boolean): string | null;
+  /** a reference video from a link (Instagram, YouTube, …), downloaded by the server */
+  addLink(url: string): string | null;
   updateFile(key: string, patch: Partial<WizardFile>): void;
   removeFile(key: string): void;
   toggleStyle(name: string): void;
@@ -123,14 +129,49 @@ function footageLength(files: WizardFile[]): number {
 }
 
 export const useWizardStore = create<WizardState>()((set, get) => {
+  /** A ready reference is seen in full on the server; Start waits for it. */
+  const analyse = async (key: string, id: string) => {
+    get().updateFile(key, { analysis: { state: "processing" } });
+    try {
+      const view = await analyseReference(id);
+      const a = view.analysis;
+      if (view.status?.state !== "ready" || !a) throw new Error(view.status?.error ?? "The reference could not be measured");
+      const summary = a.kind === "image" ? "colours measured" : `${a.cuts.length} cuts, ${a.sheets.length} contact sheets, ${a.strips.length} transition strips`;
+      get().updateFile(key, { analysis: { state: "ready", summary } });
+    } catch (error) {
+      get().updateFile(key, { analysis: { state: "error", error: error instanceof Error ? error.message : String(error) } });
+    }
+  };
+
+  /** Wait until an uploaded or downloaded file is ready, then transcribe speech or measure a reference. */
+  const prepare = async (key: string, first: UploadedMedia) => {
+    get().updateFile(key, { status: "processing", progress: 1, media: first });
+    const ready = await waitForReady(first.id, (meta) => get().updateFile(key, { media: meta }));
+    // A link is named after the video's title once it is downloaded.
+    const linked = get().files.find((f) => f.key === key)?.link;
+    get().updateFile(key, { status: "ready", media: ready, ...(linked ? { name: ready.name } : {}) });
+    return ready;
+  };
+
+  const fromLink = async (key: string, url: string) => {
+    try {
+      const ready = await prepare(key, await importLink(url));
+      await analyse(key, ready.id);
+    } catch (error) {
+      get().updateFile(key, { status: "error", error: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
   /** Upload one file, wait until it is ready, then start its transcript when it carries speech. */
   const upload = async (key: string, file: File) => {
     try {
       const uploaded = await uploadMedia(file, (progress) => get().updateFile(key, { progress }));
-      get().updateFile(key, { status: "processing", progress: 1, media: uploaded });
-      const ready = await waitForReady(uploaded.id, (meta) => get().updateFile(key, { media: meta }));
-      get().updateFile(key, { status: "ready", media: ready });
+      const ready = await prepare(key, uploaded);
       const entry = get().files.find((f) => f.key === key);
+      if (entry?.role === "reference") {
+        await analyse(key, ready.id);
+        return;
+      }
       if (entry && (entry.role === "footage" || entry.role === "voice") && ready.hasAudio) {
         await startTranscript(ready.id, whisperLanguage(get().language)).catch(() => undefined); // no Whisper: the script box is the fallback
         get().updateFile(key, { media: await fetchMedia(ready.id) });
@@ -176,6 +217,23 @@ export const useWizardStore = create<WizardState>()((set, get) => {
       if (references > MAX_WIZARD_REFERENCES) return `At most ${MAX_WIZARD_REFERENCES} references`;
       set({ files: [...current, ...accepted] });
       accepted.forEach((entry, i) => void upload(entry.key, files[i]));
+      return null;
+    },
+
+    addLink(raw) {
+      const url = raw.trim();
+      if (!/^https?:\/\/\S+$/i.test(url)) return "Paste a link that starts with https://";
+      const current = get().files;
+      if (current.filter((f) => f.role === "reference").length >= MAX_WIZARD_REFERENCES) return `At most ${MAX_WIZARD_REFERENCES} references`;
+      const key = `f${nextKey++}`;
+      let host = url;
+      try {
+        host = new URL(url).hostname.replace(/^www\./, "");
+      } catch {
+        // the server says what is wrong with it
+      }
+      set({ files: [...current, { key, name: `Link: ${host}`, kind: "video", role: "reference", note: "", status: "uploading", progress: 0, link: url }] });
+      void fromLink(key, url);
       return null;
     },
 

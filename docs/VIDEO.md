@@ -108,6 +108,8 @@ word timings for the build.
 | `GET /api/media/<id>/frames/<n>` | export frame `n` (JPEG, cached forever) |
 | `GET /api/media/<id>/file` | the file as imported, with Range support (sound, images, fonts); `Content-Security-Policy: sandbox`, so an SVG opened directly runs nothing |
 | `GET/POST/PUT /api/media/<id>/transcript` | the transcript's status and text; start Whisper (`{ language? }`); save corrections (`{ texts }`) |
+| `GET/POST /api/media/<id>/analysis` | a reference measured in full (contact sheets, transition strips, cuts, colours, loudness; [STORYBOARD.md](STORYBOARD.md#seen-in-full)); `GET …/analysis/<sheet-01.jpg>` serves its images |
+| `POST /api/media/import-url` | `{ url }`: download a video from a link with yt-dlp (no config, cookies or playlists; public hosts only; at most 1080 on the short side) into the library; answers 202 while it downloads |
 
 The library is local to the machine: a project that refers to `media/<id>` only plays where that
 file was imported. Moving a project to another computer means importing its footage there again.

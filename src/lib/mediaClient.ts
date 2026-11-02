@@ -108,6 +108,29 @@ export async function startTranscript(id: string, language?: string): Promise<vo
   );
 }
 
+/** Download a video from a link (yt-dlp on the server); resolves with its meta while it downloads. */
+export async function importLink(url: string): Promise<UploadedMedia> {
+  return readJson<UploadedMedia>(
+    await fetch("/api/media/import-url", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) }),
+  );
+}
+
+export interface AnalysisView {
+  status: { state: "processing" | "ready" | "error"; error?: string } | null;
+  analysis: { kind: "video" | "image"; duration: number; cuts: number[]; shots: unknown[]; sheets: { file: string }[]; strips: { file: string }[] } | null;
+}
+
+/** Measure a reference (contact sheets, cuts, colours, loudness) on the server, then poll until done. */
+export async function analyseReference(id: string, onUpdate?: (view: AnalysisView) => void): Promise<AnalysisView> {
+  await readJson(await fetch(mediaUrls.analysis(id), { method: "POST" }));
+  for (;;) {
+    const view = await readJson<AnalysisView>(await fetch(mediaUrls.analysis(id), { cache: "no-store" }));
+    onUpdate?.(view);
+    if (view.status?.state !== "processing") return view;
+    await sleep(1500);
+  }
+}
+
 /** Save the designer's corrections, one text per segment. */
 export async function saveTranscript(id: string, texts: string[]): Promise<void> {
   await readJson(

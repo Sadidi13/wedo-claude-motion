@@ -102,6 +102,7 @@ let newFromUrl: boolean | null = null;
 
 function describeFile(file: WizardFile): string {
   const media = file.media;
+  if (file.link && (file.status === "uploading" || (file.status === "processing" && !media?.duration))) return "Downloading the video (up to 1080p)…";
   if (file.status === "uploading") return `Uploading ${Math.round(file.progress * 100)}%`;
   if (file.status === "error") return file.error ?? "Failed";
   if (!media) return "Preparing…";
@@ -201,6 +202,21 @@ function FileRow({ file, language }: { file: WizardFile; language: string }) {
           value={file.note}
           onChange={(event) => updateFile(file.key, { note: event.target.value })}
         />
+      )}
+      {file.role === "reference" && file.analysis && (
+        <p
+          className={cx(
+            "mt-1.5 flex items-center gap-1.5 text-[11px]",
+            file.analysis.state === "error" ? "text-danger" : file.analysis.state === "ready" ? "text-success" : "text-muted",
+          )}
+        >
+          {file.analysis.state === "processing" && <LoaderCircle size={12} className="animate-spin" />}
+          {file.analysis.state === "processing"
+            ? "Seeing it in full: every cut, the colours, the motion around each transition…"
+            : file.analysis.state === "ready"
+              ? `Seen in full: ${file.analysis.summary}. Claude writes its style spec from these.`
+              : `Could not measure it (${file.analysis.error}); Claude still sees one contact sheet.`}
+        </p>
       )}
       {file.status === "ready" && file.media && (file.role === "footage" || file.role === "voice") && file.media.hasAudio && (
         <TranscriptPanel mediaId={file.media.id} language={whisperLanguage(language)} known={file.media.transcript?.state} />
@@ -324,10 +340,11 @@ function ContentStep() {
 }
 
 function StyleStep() {
-  const { files, styleHints, toggleStyle, addFiles, language } = useWizardStore(
-    useShallow((s) => ({ files: s.files, styleHints: s.styleHints, toggleStyle: s.toggleStyle, addFiles: s.addFiles, language: s.language })),
+  const { files, styleHints, toggleStyle, addFiles, addLink, language } = useWizardStore(
+    useShallow((s) => ({ files: s.files, styleHints: s.styleHints, toggleStyle: s.toggleStyle, addFiles: s.addFiles, addLink: s.addLink, language: s.language })),
   );
   const [query, setQuery] = useState("");
+  const [link, setLink] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const references = files.filter((f) => f.role === "reference");
   const groups = useMemo(() => {
@@ -393,12 +410,34 @@ function StyleStep() {
       <section className="flex flex-col gap-2">
         <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted">References to match ({references.length} of {MAX_WIZARD_REFERENCES})</h3>
         {references.length < MAX_WIZARD_REFERENCES && (
-          <DropZone
-            label="Add a reference"
-            accept="video/*,image/*"
-            hint="A video or image whose look the video should have. Claude matches its style, never its logos or text."
-            onFiles={(picked) => setProblem(addFiles(picked, true))}
-          />
+          <>
+            <DropZone
+              label="Add a reference"
+              accept="video/*,image/*"
+              hint="A video or image whose look the video should have. Claude matches its style, never its logos or text."
+              onFiles={(picked) => setProblem(addFiles(picked, true))}
+            />
+            <form
+              className="flex items-center gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const error = addLink(link);
+                setProblem(error);
+                if (!error) setLink("");
+              }}
+            >
+              <input
+                className="ms-input h-7 min-w-0 flex-1 select-text"
+                placeholder="…or paste a link: an Instagram reel, a YouTube video"
+                value={link}
+                onChange={(event) => setLink(event.target.value)}
+                aria-label="Reference link"
+              />
+              <Button size="sm" type="submit" disabled={!link.trim()}>
+                Get it
+              </Button>
+            </form>
+          </>
         )}
         {problem && <p className="text-[11px] text-danger">{problem}</p>}
         {references.map((file) => (
@@ -428,7 +467,7 @@ function StartStep({ turnOn, setTurnOn }: { turnOn: boolean; setTurnOn: (value: 
   const size = FORMAT_SIZE[state.format];
   const materials = state.files.filter((f) => f.role !== "reference");
   const references = state.files.filter((f) => f.role === "reference");
-  const pending = state.files.filter((f) => f.status === "uploading" || f.status === "processing");
+  const pending = state.files.filter((f) => f.status === "uploading" || f.status === "processing" || f.analysis?.state === "processing");
   const failed = state.files.filter((f) => f.status === "error");
   const rows: [string, ReactNode][] = [
     ["Kind", KINDS.find((k) => k.value === state.kind)?.title],
@@ -495,7 +534,7 @@ export function NewVideoWizard() {
 
   if (!open) return null;
   const { hide, setStep, start, reset } = useWizardStore.getState();
-  const pending = files.some((f) => f.status === "uploading" || f.status === "processing");
+  const pending = files.some((f) => f.status === "uploading" || f.status === "processing" || f.analysis?.state === "processing");
   const needsFootage = kind === "footage" && !files.some((f) => f.role === "footage" && f.status !== "error");
   const canStart = brief.trim().length > 0 && !pending && !needsFootage && !starting;
 

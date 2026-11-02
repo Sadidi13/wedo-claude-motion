@@ -111,6 +111,62 @@ function ListenerHint({ status, recentlyActive }: { status: BridgeStatus | null;
   );
 }
 
+/**
+ * What Claude read from the references (palette, type, motion, transitions, sound), written with
+ * the style frames. The designer can correct it; the storyboard and the build follow the saved text.
+ */
+function StyleSpecPanel({ board }: { board: Board }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  if (!board.styleSpec) return null;
+  const text = draft ?? board.styleSpec;
+  const editable = board.status !== "built";
+  const save = async () => {
+    setSaving(true);
+    setProblem(null);
+    try {
+      const response = await fetch(`/api/bridge/boards/${board.id}/spec`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ spec: text }),
+      });
+      const body = (await response.json().catch(() => null)) as { board?: Board; error?: string } | null;
+      if (!response.ok || !body?.board) throw new Error(body?.error ?? `HTTP ${response.status}`);
+      useBoardStore.setState({ board: body.board });
+      setDraft(null);
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <details className="max-w-[960px] rounded border border-border bg-panel-2 px-3 py-2">
+      <summary className="cursor-pointer text-[12px] font-medium">
+        Style spec read from the reference <span className="font-normal text-muted">(the storyboard and the video follow it; you can correct it)</span>
+      </summary>
+      <textarea
+        dir="auto"
+        value={text}
+        readOnly={!editable}
+        onChange={(event) => setDraft(event.target.value)}
+        rows={12}
+        className="ms-input ms-scroll mt-2 w-full select-text resize-y py-1.5 font-mono text-[11.5px] leading-[1.55]"
+        aria-label="Style spec"
+      />
+      {editable && (
+        <div className="mt-1.5 flex items-center gap-2">
+          <Button size="sm" disabled={draft === null || draft === board.styleSpec} loading={saving} onClick={() => void save()}>
+            Save the spec
+          </Button>
+          {problem && <span className="text-[11px] text-danger">{problem}</span>}
+        </div>
+      )}
+    </details>
+  );
+}
+
 /** Queue the step Claude declined (or the autopilot gave up on) again. */
 function RetryButton({ board }: { board: Board }) {
   const { act, busy } = useBoardStore(useShallow((s) => ({ act: s.act, busy: s.busy })));
@@ -257,6 +313,7 @@ function StylesStep({ board }: { board: Board }) {
         Pick the look of the video. Each frame is the same moment of <b className="text-foreground">{board.title}</b> in a different style.
         Hover a frame to play it. You can add a note for Claude before choosing.
       </p>
+      <StyleSpecPanel board={board} />
       <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(auto-fill, ${columns})` }}>
         {board.styles.map((style) => (
           <StyleCard
@@ -367,6 +424,7 @@ function StoryboardStep({ board }: { board: Board }) {
         {board.shots.length} shots over {formatSeconds(board.meta.duration)}. Approve it to make the video, or ask for changes.
       </p>
       <ShotStrip shots={board.shots} duration={board.meta.duration} />
+      <StyleSpecPanel board={board} />
       {board.storyboardNotes && (
         <p dir="auto" className="max-w-[960px] whitespace-pre-wrap rounded border border-border bg-panel-2 px-3 py-2 text-[12px] leading-[1.6] text-muted">
           {board.storyboardNotes}

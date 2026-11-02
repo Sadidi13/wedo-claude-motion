@@ -14,13 +14,14 @@
  */
 
 import { spawn } from "node:child_process";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { dataUrlToBytes, extensionOf } from "@/lib/importer/dataUrl";
 import { mediaKindOf } from "@/lib/media";
 import type { BoardReference } from "@/lib/types";
 import { ffmpegPath, runFfmpeg } from "../export/ffmpeg";
+import { analysisDir, ensureAnalysis } from "../media/analysis";
 import { mediaPaths, readMeta } from "../media/store";
 import { BridgeStateError, bridgeRoot, isValidBridgeId } from "./store";
 
@@ -48,8 +49,42 @@ export function referencesDir(boardId: string): string {
 
 /** Absolute path of one of a board's reference files; null for names it does not own. */
 export function referenceFile(boardId: string, file: string): string | null {
-  if (!/^r\d{1,2}\.(?:preview\.jpg|[a-z0-9]{2,5})$/.test(file)) return null;
+  if (!/^r\d{1,2}\.(?:preview\.jpg|(?:sheet|strip)-\d{2}\.jpg|[a-z0-9]{2,5})$/.test(file)) return null;
   return path.join(referencesDir(boardId), file);
+}
+
+/** Images Claude sees across all of a board's references, at most this many (the style step's message). */
+export const MAX_REFERENCE_IMAGES = 20;
+
+/**
+ * The reference images Claude is shown, in order: per reference its contact sheets then its
+ * transition strips (or its one preview), until MAX_REFERENCE_IMAGES. The autopilot attaches these
+ * files in this order and the brief describes them in the same order (scripts/lib/bridge-client.mjs
+ * `boardReferenceFiles` follows the same rule).
+ */
+export function referenceImageList(references: BoardReference[]): { ref: BoardReference; file: string; label: string }[] {
+  const list: { ref: BoardReference; file: string; label: string }[] = [];
+  for (const ref of references) {
+    const images = ref.sheets?.length
+      ? [
+          ...ref.sheets.map((sheet, i) => ({
+            file: sheet.file,
+            label: sheet.times.length
+              ? `${ref.id} contact sheet ${i + 1}: ${sheet.columns}x${sheet.rows} frames from ${sheet.times[0]}s to ${sheet.times[sheet.times.length - 1]}s, left to right, top to bottom`
+              : `${ref.id}: the image`,
+          })),
+          ...(ref.strips ?? []).map((strip, i) => ({
+            file: strip.file,
+            label: `${ref.id} transition ${i + 1}: every frame from ${strip.times[0]}s to ${strip.times[strip.times.length - 1]}s around the cut at ${strip.cut}s, left to right, top to bottom`,
+          })),
+        ]
+      : [{ file: ref.preview, label: ref.kind === "video" ? `${ref.id}: contact sheet of the video` : `${ref.id}: the image` }];
+    for (const image of images) {
+      if (list.length >= MAX_REFERENCE_IMAGES) return list;
+      list.push({ ref, ...image });
+    }
+  }
+  return list;
 }
 
 function displayName(name: string): string {
@@ -160,7 +195,24 @@ export async function saveReferenceFromMedia(boardId: string, index: number, med
   const target = path.join(dir, preview);
   try {
     const made = await makePreview(mediaPaths.source(mediaId, meta.ext), kind, target);
-    return { id, name: displayName(meta.name), kind, file: preview, preview, mediaId, ...made };
+    const reference: BoardReference = { id, name: displayName(meta.name), kind, file: preview, preview, mediaId, ...made };
+    // The reference seen in full: its sheets and strips are copied next to the board (the briefs and the autopilot read them there).
+    try {
+      const analysis = await ensureAnalysis(mediaId);
+      if (!analysis) return reference;
+      const copy = async (name: string) => {
+        await copyFile(path.join(analysisDir(mediaId), name), path.join(dir, `${id}.${name}`));
+        return `${id}.${name}`;
+      };
+      const sheets = [];
+      for (const sheet of analysis.sheets) sheets.push({ ...sheet, file: await copy(sheet.file) });
+      const strips = [];
+      for (const strip of analysis.strips) strips.push({ ...strip, file: await copy(strip.file) });
+      const { fps, width, height, cuts, shots, loudness } = analysis;
+      return { ...reference, sheets, strips, analysis: { fps, width, height, cuts, shots, loudness } };
+    } catch {
+      return reference; // the one contact sheet still shows the look
+    }
   } catch (error) {
     await rm(target, { force: true });
     const reason = error instanceof Error ? error.message.split("\n")[0] : String(error);

@@ -304,6 +304,7 @@ async function cmdBoardStyles(positional, flags) {
     ...(title ? { title } : {}),
     ...(brief ? { brief } : {}),
     ...(manifest.stage ? { stage: manifest.stage } : {}),
+    ...(typeof manifest.styleSpec === "string" && manifest.styleSpec.trim() ? { styleSpec: manifest.styleSpec } : {}),
     styles: manifest.styles,
   });
   const opened = await showBoard(board.id);

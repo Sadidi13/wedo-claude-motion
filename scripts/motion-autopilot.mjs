@@ -348,6 +348,7 @@ async function deliverBoardStep(request, reply) {
       boardId: request.boardId,
       ...(typeof reply.title === "string" && reply.title.trim() ? { title: reply.title.trim() } : {}),
       ...(reply.stage && typeof reply.stage === "object" ? { stage: reply.stage } : {}),
+      ...(typeof reply.styleSpec === "string" && reply.styleSpec.trim() ? { styleSpec: reply.styleSpec.trim() } : {}),
       styles: reply.styles,
     });
     return { message: `Proposed ${board.styles.length} style frames: ${board.styles.map((style) => style.name).join(", ")}` };

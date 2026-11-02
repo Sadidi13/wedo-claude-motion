@@ -93,6 +93,28 @@ The next style step's brief tells Claude to match the reference's look (palette,
 pacing, transitions) and how to see the previews: their file paths for the Code tab (Read tool),
 `get_board_references` for the chat (MCP image content), and image input for the autopilot.
 
+### Seen in full
+
+References from the New video wizard (an upload of any size, or a link: an Instagram reel or a
+YouTube video, downloaded at up to 1080p with yt-dlp, `src/lib/server/media/download.ts`) go into
+the media library and are measured on this computer with ffmpeg before the board starts
+(`src/lib/server/media/analysis.ts`, about half a minute for a 40-second reel, no Claude usage):
+
+- **contact sheets** of the whole video: up to 8 frames a second, at most 12 sheets, tiles shaped
+  like the video (6 × 3 for a vertical reel);
+- **transition strips**: every frame from 0.25 s before to 0.35 s after up to 6 cuts spread over
+  the video, so a flash, a glitch or a type-on reads frame by frame;
+- **numbers**: every cut (scene score above 0.3), each shot's main colours and brightness, and the
+  loudness (EBU R128 integrated, true peak).
+
+The style step's brief lists the numbers and the images in the order Claude receives them (at most
+20 images; the same rule in `referenceImageList` and in the tools' `boardReferenceFiles`), and asks
+Claude to write a **style spec** with the style frames (`styleSpec`: formula, hex palette, type,
+motion, transitions frame by frame, sound) and to make style frame A match it exactly. The board
+keeps the spec; the storyboard view shows it under **Style spec read from the reference**, where
+the designer can correct it (`PUT /api/bridge/boards/<id>/spec`), and the storyboard and build
+briefs carry the corrected text.
+
 ## Files
 
 | File | What |
