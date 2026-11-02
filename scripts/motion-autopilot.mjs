@@ -196,11 +196,18 @@ function claudeCommand() {
 }
 
 /** A clean environment: no variables of a Claude Code session this happens to be started from. */
+/**
+ * Room for a whole scene in one reply: the build of a long video runs past Claude Code's default
+ * output limit, and a reply cut off there is not valid JSON.
+ */
+const MAX_OUTPUT_TOKENS = 64_000;
+
 function childEnv() {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
     if (key.startsWith("CLAUDE") && key !== "CLAUDE_CONFIG_DIR") delete env[key];
   }
+  env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(MAX_OUTPUT_TOKENS);
   return env;
 }
 
@@ -555,7 +562,7 @@ async function handleBoardStep(bin, request, model) {
       return;
     } catch (error) {
       if (error instanceof BridgeValidationError && attempt === 1) {
-        say("  The answer did not pass validation; asking Claude to fix it");
+        say(`  The answer did not pass validation (${error.message.replace(/\s+/g, " ").slice(0, 240)}); asking Claude to fix it`);
         prompt = `${request.brief}\n\n# Your previous reply\n${text}\n\n# Problem\nIt failed validation: ${error.message}\nReturn the corrected JSON object only.`;
         continue;
       }
