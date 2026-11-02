@@ -8,7 +8,7 @@ import type { AudioClip } from "@/runtime/audio";
 // Ingest spawns ffmpeg on the stored file; these tests only cover storing and looking it up.
 vi.mock("../ingest", () => ({ startIngest: vi.fn(async () => undefined), ensureMediaReady: vi.fn() }));
 
-const { cleanFileName, extensionOf, importVideo } = await import("../upload");
+const { cleanFileName, extensionOf, importMedia, importVideo } = await import("../upload");
 const { listMedia, mediaDir, mediaPaths, readMeta, writeMeta } = await import("../store");
 const { prepareAudio } = await import("../../export/audio");
 
@@ -34,12 +34,23 @@ const streamOf = (bytes: Uint8Array) =>
   });
 
 describe("importing", () => {
-  it("cleans names and keeps only video extensions", () => {
+  it("cleans names and keeps only the extensions the library takes", () => {
     expect(cleanFileName(encodeURIComponent("C:\\Users\\me\\Talk take 2.mp4"))).toBe("Talk take 2.mp4");
     expect(cleanFileName("../../etc/passwd")).toBe("passwd");
     expect(cleanFileName(null)).toBe("video.mp4");
     expect(extensionOf("Talk.MOV")).toBe("mov");
-    expect(extensionOf("song.mp3")).toBeNull();
+    expect(extensionOf("song.mp3")).toBe("mp3");
+    expect(extensionOf("Brand-Bold.WOFF2")).toBe("woff2");
+    expect(extensionOf("notes.txt")).toBeNull();
+    expect(extensionOf("setup.exe")).toBeNull();
+  });
+
+  it("records the kind the extension makes a file", async () => {
+    const bytes = new TextEncoder().encode("bytes");
+    expect((await importMedia(streamOf(bytes), "voice over.mp3")).kind).toBe("audio");
+    expect((await importMedia(streamOf(bytes), "logo.svg")).kind).toBe("image");
+    expect((await importMedia(streamOf(bytes), "Peyda-Bold.ttf")).kind).toBe("font");
+    expect((await importMedia(streamOf(bytes), "take.mp4")).kind).toBe("video");
   });
 
   it("streams the body to <id>/source.<ext> and starts in the processing state", async () => {
@@ -84,7 +95,7 @@ describe("a <Video>'s sound in the export mix", () => {
       expect(inputs[0].length).toBe(46.35);
       expect(skipped).toHaveLength(2);
       expect(skipped.join("\n")).toMatch(/no sound/);
-      expect(skipped.join("\n")).toMatch(/not a video this project uses/);
+      expect(skipped.join("\n")).toMatch(/not a file this project uses/);
     } finally {
       await rm(job, { recursive: true, force: true });
     }

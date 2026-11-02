@@ -6,7 +6,8 @@
  *   <Audio src="assets/music.mp3" start={0} end={8} volume={0.8} fadeOut={1.5} data-layer-name="Music" />
  *   <Audio sfx="whoosh" start={1.2} data-layer-name="Whoosh" />
  *
- *   src / sfx   a project audio file (the loader turns the path into a data: URL)
+ *   src / sfx   a project audio file (the loader turns the path into a data: URL), a sound
+ *               from the media library (`media/<id>.mp3`, played from /api/media/<id>/file)
  *               or a built-in sound (src/lib/audio/sfx.ts)
  *   start, end  stage seconds; without `end` the clip plays to its own length
  *               (or, looping, to the end of the stage)
@@ -25,6 +26,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, type HTMLAttributes } from "react";
 import { isSfxName, sfxDuration } from "@/lib/audio/sfx";
+import { mediaIdOf, mediaUrls } from "@/lib/media";
 import { useClock, type ClockState } from "./clock";
 import { clamp } from "./easing";
 import { motionWindow } from "./globals";
@@ -195,7 +197,8 @@ export function Audio({
   // One <audio> element per source, outside the document. Never in export.
   useEffect(() => {
     if (isRenderMode()) return;
-    const url = src ?? (sfx && isSfxName(sfx) ? sfxUrl(sfx) : null);
+    const mediaId = mediaIdOf(src);
+    const url = mediaId ? mediaUrls.file(mediaId) : (src ?? (sfx && isSfxName(sfx) ? sfxUrl(sfx) : null));
     if (!url) return;
     const element = new window.Audio(url);
     element.preload = "auto";

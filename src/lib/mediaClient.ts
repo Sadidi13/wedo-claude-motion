@@ -1,14 +1,15 @@
 /**
- * Browser side of the media library (docs/VIDEO.md): upload a video to the local server and wait
- * for its length. XMLHttpRequest rather than fetch, for upload progress.
+ * Browser side of the media library (docs/VIDEO.md): upload a file to the local server, wait until
+ * it is ready, and work with its Whisper transcript. XMLHttpRequest rather than fetch for uploads,
+ * for upload progress.
  */
 
-import { mediaUrls, type MediaMeta } from "@/lib/media";
+import { mediaUrls, type MediaMeta, type TranscriptStatus } from "@/lib/media";
 
 export type UploadedMedia = MediaMeta & { ref: string };
 
 /** POST the file as a raw body; `onProgress` gets 0..1. Rejects with the server's message. */
-export function uploadVideo(file: File, onProgress?: (fraction: number) => void): Promise<UploadedMedia> {
+export function uploadMedia(file: File, onProgress?: (fraction: number) => void): Promise<UploadedMedia> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/media/upload");
@@ -32,7 +33,16 @@ export function uploadVideo(file: File, onProgress?: (fraction: number) => void)
   });
 }
 
+/** Footage upload (the layers panel's Video button). */
+export const uploadVideo = uploadMedia;
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function fetchMedia(id: string): Promise<UploadedMedia> {
+  const response = await fetch(mediaUrls.meta(id), { cache: "no-store" });
+  if (!response.ok) throw new Error(`Could not read the file's details (HTTP ${response.status})`);
+  return (await response.json()) as UploadedMedia;
+}
 
 /**
  * Poll the file's metadata until its length is known (the server reads it first, in about a
@@ -41,12 +51,66 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export async function waitForLength(id: string, timeoutMs = 60_000): Promise<MediaMeta> {
   const until = Date.now() + timeoutMs;
   for (;;) {
-    const response = await fetch(mediaUrls.meta(id), { cache: "no-store" });
-    if (!response.ok) throw new Error(`Could not read the video's details (HTTP ${response.status})`);
-    const meta = (await response.json()) as MediaMeta;
+    const meta = await fetchMedia(id);
     if (meta.state === "error") throw new Error(meta.error ?? "The video could not be prepared");
     if (meta.duration > 0 || meta.state === "ready") return meta;
     if (Date.now() > until) throw new Error("The server took too long to read the video");
     await sleep(500);
   }
+}
+
+/** Poll until the file is ready (a video's frames are written) or failed. */
+export async function waitForReady(id: string, onUpdate?: (meta: UploadedMedia) => void, timeoutMs = 60 * 60_000): Promise<UploadedMedia> {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const meta = await fetchMedia(id);
+    onUpdate?.(meta);
+    if (meta.state === "error") throw new Error(meta.error ?? "The file could not be prepared");
+    if (meta.state === "ready") return meta;
+    if (Date.now() > until) throw new Error("The server took too long to prepare the file");
+    await sleep(1500);
+  }
+}
+
+export interface TranscriptSegmentView {
+  start: number;
+  end: number;
+  text: string;
+  edited?: boolean;
+}
+
+export interface TranscriptView {
+  status: TranscriptStatus | null;
+  transcript: { language: string; segments: TranscriptSegmentView[] } | null;
+  /** Whisper is set up on this computer */
+  available: boolean;
+  canTranscribe: boolean;
+}
+
+async function readJson<T>(response: Response): Promise<T> {
+  const body = (await response.json().catch(() => null)) as (T & { error?: string }) | null;
+  if (!response.ok) throw new Error(body?.error ?? `HTTP ${response.status}`);
+  return body as T;
+}
+
+export async function getTranscript(id: string): Promise<TranscriptView> {
+  return readJson<TranscriptView>(await fetch(mediaUrls.transcript(id), { cache: "no-store" }));
+}
+
+/** Start Whisper on the file; `language` is a hint like "fa". */
+export async function startTranscript(id: string, language?: string): Promise<void> {
+  await readJson(
+    await fetch(mediaUrls.transcript(id), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(language ? { language } : {}),
+    }),
+  );
+}
+
+/** Save the designer's corrections, one text per segment. */
+export async function saveTranscript(id: string, texts: string[]): Promise<void> {
+  await readJson(
+    await fetch(mediaUrls.transcript(id), { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ texts }) }),
+  );
 }

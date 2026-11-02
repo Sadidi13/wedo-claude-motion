@@ -364,6 +364,27 @@ export interface BoardReference {
   duration?: number;
   /** video only: the times of the sheet's frames, left to right, top to bottom */
   frames?: number[];
+  /** set when the file lives in the media library (the wizard uploads references there) */
+  mediaId?: string;
+}
+
+/** What kind of video the New video wizard set up. */
+export type VideoKind = "motion" | "footage" | "chat";
+
+/** How the designer means a material to be used. */
+export type MaterialRole = "footage" | "voice" | "music" | "sfx" | "image" | "logo" | "font";
+
+/** A file from the media library the video is made with (footage, voice, music, logo, font). */
+export interface BoardMaterial {
+  mediaId: string;
+  role: MaterialRole;
+  /** the file name as imported (display only) */
+  name: string;
+  /** what scene code writes: `media/<id>.<ext>` */
+  ref: string;
+  kind: "video" | "audio" | "image" | "font";
+  /** the designer's note: "only 0:05-0:20", "the logo goes at the end" */
+  note?: string;
 }
 
 export type BoardStatus =
@@ -402,6 +423,15 @@ export interface Board {
   notes: BoardNote[];
   /** reference images / videos for the look (absent on boards saved before references existed) */
   references?: BoardReference[];
+  /** set by the New video wizard (absent on boards started from Ask Claude) */
+  videoKind?: VideoKind;
+  /** language of the video's words, e.g. "Persian" */
+  language?: string;
+  /** the words the video says or shows, as the designer wrote them */
+  script?: string;
+  materials?: BoardMaterial[];
+  /** style-library directions the designer picked (names); empty: Claude chooses */
+  styleHints?: string[];
   /** project made from this board, once built */
   projectId: string | null;
   /** the request queued for Claude about this board's current step, until Claude answers it */

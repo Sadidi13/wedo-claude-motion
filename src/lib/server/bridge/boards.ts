@@ -22,12 +22,25 @@
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { finalizeOutput } from "@/lib/ai";
+import { STYLE_LIBRARY, finalizeOutput } from "@/lib/ai";
 import { SafeProjectPathSchema } from "@/lib/ai/schema";
 import { createBlankProject } from "@/lib/importer";
+import { MEDIA_ID_PATTERN, type MediaKind, mediaKindOf, mediaRef } from "@/lib/media";
 import { parseScene } from "@/lib/parser";
-import type { AiEditRequest, Board, BoardAction, BoardReference, BoardShot, BoardStyle, BoardSummary, StageMeta } from "@/lib/types";
-import { MAX_REFERENCES, ReferenceUploadSchema, type ReferenceUpload, removeReferences, saveReference } from "./references";
+import type {
+  AiEditRequest,
+  Board,
+  BoardAction,
+  BoardMaterial,
+  BoardReference,
+  BoardShot,
+  BoardStyle,
+  BoardSummary,
+  MaterialRole,
+  StageMeta,
+} from "@/lib/types";
+import { readMeta as readMediaMeta } from "../media/store";
+import { MAX_REFERENCES, ReferenceUploadSchema, type ReferenceUpload, removeReferences, saveReference, saveReferenceFromMedia } from "./references";
 import {
   type BoardRequestInfo,
   BridgeStateError,
@@ -48,6 +61,8 @@ export const MAX_SHOTS = 16;
 /** Boards kept on disk; older ones are deleted when a new one is created. */
 export const MAX_BOARDS = 40;
 const MAX_BRIEF_CHARS = 8_000;
+const MAX_SCRIPT_CHARS = 20_000;
+export const MAX_MATERIALS = 24;
 const MAX_NOTE_CHARS = 4_000;
 const MAX_CODE_CHARS = 200_000;
 
@@ -116,15 +131,41 @@ async function pruneBoards(): Promise<void> {
 }
 
 /** Save uploads as the board's next references (r1, r2, …), at most MAX_REFERENCES in all. */
-async function addReferenceFiles(board: Board, uploads: ReferenceUpload[]): Promise<BoardReference[]> {
+async function addReferenceFiles(board: Board, uploads: ReferenceUpload[], mediaIds: string[] = []): Promise<BoardReference[]> {
   const existing = board.references ?? [];
-  if (existing.length + uploads.length > MAX_REFERENCES) {
+  if (existing.length + uploads.length + mediaIds.length > MAX_REFERENCES) {
     throw new BridgeStateError(`A storyboard takes at most ${MAX_REFERENCES} references`, 400);
   }
   const added: BoardReference[] = [];
   let next = existing.reduce((max, ref) => Math.max(max, Number(ref.id.slice(1)) || 0), 0);
   for (const upload of uploads) added.push(await saveReference(board.id, ++next, upload));
+  for (const mediaId of mediaIds) added.push(await saveReferenceFromMedia(board.id, ++next, mediaId));
   return [...existing, ...added];
+}
+
+/** Which kinds of library file each role takes. */
+const ROLE_KINDS: Record<MaterialRole, readonly MediaKind[]> = {
+  footage: ["video"],
+  voice: ["audio", "video"],
+  music: ["audio", "video"],
+  sfx: ["audio"],
+  image: ["image"],
+  logo: ["image"],
+  font: ["font"],
+};
+
+/** The wizard's materials, checked against the media library. */
+async function resolveMaterials(inputs: z.infer<typeof MaterialInputSchema>[]): Promise<BoardMaterial[]> {
+  const materials: BoardMaterial[] = [];
+  for (const input of inputs) {
+    const meta = await readMediaMeta(input.mediaId);
+    if (!meta) throw new BoardValidationError(`media/${input.mediaId} is not in the media library`);
+    if (meta.state === "error") throw new BoardValidationError(`"${meta.name}" could not be prepared: ${meta.error ?? "error"}`);
+    const kind = mediaKindOf(meta);
+    if (!ROLE_KINDS[input.role].includes(kind)) throw new BoardValidationError(`"${meta.name}" (a ${kind} file) cannot be used as ${input.role}`);
+    materials.push({ mediaId: meta.id, role: input.role, name: meta.name, ref: mediaRef(meta.id, meta.ext), kind, ...(input.note ? { note: input.note } : {}) });
+  }
+  return materials;
 }
 
 function newBoard(input: { title: string; brief: string; meta: StageMeta }, now: Date): Board {
@@ -213,12 +254,29 @@ export const BoardActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("approve"), note: z.string().trim().max(MAX_NOTE_CHARS).optional() }),
 ]);
 
-/** POST /api/bridge/boards/start (the editor's Ask Claude tab, scope "New scene"). */
+const MediaIdSchema = z.string().regex(MEDIA_ID_PATTERN);
+
+/** A media-library file the video is made with (the New video wizard). */
+const MaterialInputSchema = z.object({
+  mediaId: MediaIdSchema,
+  role: z.enum(["footage", "voice", "music", "sfx", "image", "logo", "font"]),
+  note: z.string().trim().max(500).optional(),
+});
+
+/** POST /api/bridge/boards/start (the New video wizard, or the Ask Claude tab's "New scene"). */
 export const BoardStartSchema = z.object({
   brief: z.string().trim().min(1).max(MAX_BRIEF_CHARS),
   stage: StageInputSchema.optional(),
   /** reference images / videos for the look */
   references: z.array(ReferenceUploadSchema).max(MAX_REFERENCES).optional(),
+  /** references already in the media library (the wizard uploads them there) */
+  referenceMedia: z.array(MediaIdSchema).max(MAX_REFERENCES).optional(),
+  videoKind: z.enum(["motion", "footage", "chat"]).optional(),
+  language: z.string().trim().max(40).optional(),
+  script: z.string().trim().max(MAX_SCRIPT_CHARS).optional(),
+  materials: z.array(MaterialInputSchema).max(MAX_MATERIALS).optional(),
+  /** style-library directions, by name */
+  styleHints: z.array(z.string().trim().min(1).max(80)).max(3).optional(),
 });
 
 /** POST /api/bridge/boards/[id]/references (the editor): more references, e.g. before "Try other styles". */
@@ -313,9 +371,20 @@ export function startBoard(input: z.infer<typeof BoardStartSchema>, now = new Da
     const meta = resolveMeta(input.stage, DEFAULT_META);
     const title = input.brief.replace(/\s+/g, " ").trim().slice(0, 60);
     let board = newBoard({ title, brief: input.brief, meta }, now);
-    if (input.references?.length) {
+    const materials = input.materials?.length ? await resolveMaterials(input.materials) : [];
+    const known = new Set(STYLE_LIBRARY.map((style) => style.name));
+    const styleHints = (input.styleHints ?? []).filter((name) => known.has(name));
+    board = {
+      ...board,
+      ...(input.videoKind ? { videoKind: input.videoKind } : {}),
+      ...(input.language ? { language: input.language } : {}),
+      ...(input.script ? { script: input.script } : {}),
+      ...(materials.length ? { materials } : {}),
+      ...(styleHints.length ? { styleHints } : {}),
+    };
+    if (input.references?.length || input.referenceMedia?.length) {
       try {
-        board = { ...board, references: await addReferenceFiles(board, input.references) };
+        board = { ...board, references: await addReferenceFiles(board, input.references ?? [], input.referenceMedia ?? []) };
       } catch (error) {
         await removeReferences(board.id);
         throw error;

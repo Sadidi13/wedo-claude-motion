@@ -57,6 +57,14 @@ function showNow(info: AutopilotInfo): void {
   if (status) setStatus({ ...status, autopilot: info });
 }
 
+/** Start or stop the autopilot from anywhere in the editor (the wizard, the storyboard view); the top bar shows the result at once. */
+export async function autopilotAction(action: "start" | "stop"): Promise<AutopilotInfo> {
+  const info = await send(action);
+  showNow(info);
+  if (info.message && !info.running) useEditorStore.getState().setNotice({ kind: "warning", message: info.message });
+  return info;
+}
+
 export function AutopilotChip() {
   const { autopilot, chatListening, unreachable } = useBridgeStore(
     useShallow((s) => ({

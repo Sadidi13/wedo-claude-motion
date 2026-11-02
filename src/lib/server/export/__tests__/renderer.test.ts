@@ -94,6 +94,9 @@ describe("isAllowedRenderRequest", () => {
     const withMedia = (url: string) => isAllowedRenderRequest(url, page, "abcdefghijklmn", ["k3f9x2abcd12"]);
     expect(withMedia("http://localhost:3000/api/media/k3f9x2abcd12")).toBe(true);
     expect(withMedia("http://localhost:3000/api/media/k3f9x2abcd12/frames/1388")).toBe(true);
+    expect(withMedia("http://localhost:3000/api/media/k3f9x2abcd12/file")).toBe(true);
+    expect(withMedia("http://localhost:3000/api/media/otherotherxx/file")).toBe(false);
+    expect(withMedia("http://localhost:3000/api/media/k3f9x2abcd12/transcript")).toBe(false);
     expect(withMedia("http://localhost:3000/api/media/k3f9x2abcd12/preview")).toBe(false);
     expect(withMedia("http://localhost:3000/api/media/otherotherxx/frames/0")).toBe(false);
     expect(withMedia("http://localhost:3000/api/media")).toBe(false);

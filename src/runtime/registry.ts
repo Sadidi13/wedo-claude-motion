@@ -15,7 +15,7 @@
 import type { LayerRect, StageMeta } from "@/lib/types";
 import { setClock } from "./clock";
 import { motionWindow } from "./globals";
-import { whenIdle } from "./pending";
+import { whenSettled } from "./pending";
 
 export interface StageHandle {
   meta: StageMeta;
@@ -44,7 +44,7 @@ function installGlobals(handle: StageHandle | undefined): void {
   w.__seek = (time) => handle.seek(time);
   w.__setTransparent = (transparent) => handle.setTransparent(transparent);
   w.__getLayerRects = () => measureLayerRects(handle);
-  w.__whenIdle = whenIdle;
+  w.__whenIdle = whenSettled;
   w.__ready = true;
 }
 

@@ -18,8 +18,10 @@ import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { dataUrlToBytes, extensionOf } from "@/lib/importer/dataUrl";
+import { mediaKindOf } from "@/lib/media";
 import type { BoardReference } from "@/lib/types";
 import { ffmpegPath, runFfmpeg } from "../export/ffmpeg";
+import { mediaPaths, readMeta } from "../media/store";
 import { BridgeStateError, bridgeRoot, isValidBridgeId } from "./store";
 
 export const MAX_REFERENCES = 4;
@@ -109,31 +111,60 @@ export async function saveReference(boardId: string, index: number, upload: Refe
   await writeFile(source, bytes);
   const target = path.join(dir, preview);
   try {
-    if (kind === "image") {
-      await runFfmpeg(
-        ["-y", "-hide_banner", "-loglevel", "error", "-i", source, "-frames:v", "1", "-vf", `scale='min(${PREVIEW_WIDTH},iw)':-2`, "-q:v", "3", target],
-        { timeoutMs: 60_000 },
-      );
-      return { id, name: displayName(upload.name), kind, file, preview };
-    }
-    const duration = await probeDuration(source);
-    if (!duration || duration <= 0) throw new Error("could not read the video's duration");
-    const { columns, rows, times } = sheetLayout(duration);
-    const fps = (columns * rows) / duration;
-    await runFfmpeg(
-      [
-        "-y", "-hide_banner", "-loglevel", "error", "-i", source,
-        "-vf", `fps=${fps.toFixed(6)},scale=${SHEET_TILE_WIDTH}:-2,tile=${columns}x${rows}:padding=4:color=black`,
-        "-frames:v", "1", "-q:v", "3", target,
-      ],
-      { timeoutMs: 120_000 },
-    );
-    return { id, name: displayName(upload.name), kind, file, preview, duration: Number(duration.toFixed(2)), frames: times };
+    return { id, name: displayName(upload.name), kind, file, preview, ...(await makePreview(source, kind, target)) };
   } catch (error) {
     await rm(source, { force: true });
     await rm(target, { force: true });
     const reason = error instanceof Error ? error.message.split("\n")[0] : String(error);
     throw new BridgeStateError(`"${displayName(upload.name)}" could not be read as ${kind === "image" ? "an image" : "a video"} (${reason})`, 422);
+  }
+}
+
+/** Write the JPEG Claude looks at: a downscaled image, or a contact sheet of a video's frames. */
+async function makePreview(source: string, kind: "image" | "video", target: string): Promise<Pick<BoardReference, "duration" | "frames">> {
+  if (kind === "image") {
+    await runFfmpeg(
+      ["-y", "-hide_banner", "-loglevel", "error", "-i", source, "-frames:v", "1", "-vf", `scale='min(${PREVIEW_WIDTH},iw)':-2`, "-q:v", "3", target],
+      { timeoutMs: 60_000 },
+    );
+    return {};
+  }
+  const duration = await probeDuration(source);
+  if (!duration || duration <= 0) throw new Error("could not read the video's duration");
+  const { columns, rows, times } = sheetLayout(duration);
+  const fps = (columns * rows) / duration;
+  await runFfmpeg(
+    [
+      "-y", "-hide_banner", "-loglevel", "error", "-i", source,
+      "-vf", `fps=${fps.toFixed(6)},scale=${SHEET_TILE_WIDTH}:-2,tile=${columns}x${rows}:padding=4:color=black`,
+      "-frames:v", "1", "-q:v", "3", target,
+    ],
+    { timeoutMs: 120_000 },
+  );
+  return { duration: Number(duration.toFixed(2)), frames: times };
+}
+
+/**
+ * Reference r<index> from a file in the media library (the New video wizard uploads references
+ * there, so they have no size limit): only its preview is stored with the board.
+ */
+export async function saveReferenceFromMedia(boardId: string, index: number, mediaId: string): Promise<BoardReference> {
+  const meta = await readMeta(mediaId);
+  if (!meta) throw new BridgeStateError(`media/${mediaId} is not in the media library`, 400);
+  const kind = mediaKindOf(meta);
+  if (kind !== "image" && kind !== "video") throw new BridgeStateError(`"${meta.name}": references can be images or videos`, 400);
+  const dir = referencesDir(boardId);
+  await mkdir(dir, { recursive: true });
+  const id = `r${index}`;
+  const preview = `${id}.preview.jpg`;
+  const target = path.join(dir, preview);
+  try {
+    const made = await makePreview(mediaPaths.source(mediaId, meta.ext), kind, target);
+    return { id, name: displayName(meta.name), kind, file: preview, preview, mediaId, ...made };
+  } catch (error) {
+    await rm(target, { force: true });
+    const reason = error instanceof Error ? error.message.split("\n")[0] : String(error);
+    throw new BridgeStateError(`"${displayName(meta.name)}" could not be read as ${kind === "image" ? "an image" : "a video"} (${reason})`, 422);
   }
 }
 

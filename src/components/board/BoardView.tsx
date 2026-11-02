@@ -17,9 +17,10 @@ import { Check, Clapperboard, LayoutGrid, LoaderCircle, Palette, Paperclip, Refr
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { Board, BoardShot, BoardStatus, BoardStyle, BridgeStatus } from "@/lib/types";
-import { MAX_REFERENCE_FILES, checkReferenceFiles, useBoardStore } from "@/store/boardStore";
+import { MAX_REFERENCE_FILES, type BoardActionBody, checkReferenceFiles, useBoardStore } from "@/store/boardStore";
 import { isDesktopConnected, useBridgeStore } from "@/store/bridgeStore";
 import { useEditorStore } from "@/store/editorStore";
+import { autopilotAction } from "../AutopilotChip";
 import { Button } from "../ui/Button";
 import { cx } from "../ui/cx";
 import { IconButton } from "../ui/IconButton";
@@ -73,16 +74,59 @@ function Steps({ status, view, onView }: { status: BoardStatus; view: View; onVi
 
 /** Who answers Claude-side steps, and what to do when nobody does. */
 function ListenerHint({ status, recentlyActive }: { status: BridgeStatus | null; recentlyActive: boolean }) {
-  if (isDesktopConnected(status) || recentlyActive) {
-    const who = status?.listenerClient === "headless" ? "The autopilot" : "Claude";
-    return <p className="text-[12px] text-muted">{who} is on it. This usually takes under a minute.</p>;
+  const [busy, setBusy] = useState(false);
+  const autopilot = status?.autopilot;
+  if (autopilot?.running) {
+    const effort = autopilot.effort?.deep ? `, effort ${autopilot.effort.deep}` : "";
+    return (
+      <p className="text-[12px] text-muted">
+        {autopilot.state === "working" ? "The autopilot is working on it" : "The autopilot picks it up now"} ({autopilot.model ?? "Claude"}
+        {effort}). A step usually takes a few minutes.
+      </p>
+    );
+  }
+  if (isDesktopConnected(status) || (recentlyActive && status?.listenerClient !== "headless")) {
+    return <p className="text-[12px] text-muted">Claude is on it in the chat.</p>;
   }
   return (
-    <p dir="auto" className="max-w-[640px] rounded border border-accent-2/40 bg-accent-2/10 px-3 py-2 text-[12px] leading-[1.6] text-accent-2">
-      Nobody is listening yet. Start the autopilot (the <b>WeDo Claude Motion - Autopilot</b> shortcut, or{" "}
-      <span className="font-mono">scripts/start-autopilot.cmd</span>), or write <b>“check Claude Motion”</b> (
-      <span dir="rtl">«کلاد موشن رو چک کن»</span>) to Claude in the chat or the Code tab.
-    </p>
+    <div dir="auto" className="flex max-w-[640px] flex-col items-center gap-2 rounded border border-accent-2/40 bg-accent-2/10 px-3 py-2.5 text-[12px] leading-[1.6] text-accent-2">
+      <p>
+        Nobody is listening yet. Turn the autopilot on, or write <b>“check Claude Motion”</b> (<span dir="rtl">«کلاد موشن رو چک کن»</span>) to
+        Claude in the chat or the Code tab.
+      </p>
+      <Button
+        size="sm"
+        variant="primary"
+        loading={busy}
+        onClick={() => {
+          setBusy(true);
+          void autopilotAction("start")
+            .catch((error: unknown) => useEditorStore.getState().setNotice({ kind: "error", message: `Autopilot: ${String(error)}` }))
+            .finally(() => setBusy(false));
+        }}
+      >
+        Turn the autopilot on
+      </Button>
+    </div>
+  );
+}
+
+/** Queue the step Claude declined (or the autopilot gave up on) again. */
+function RetryButton({ board }: { board: Board }) {
+  const { act, busy } = useBoardStore(useShallow((s) => ({ act: s.act, busy: s.busy })));
+  const body: BoardActionBody | null =
+    board.status === "styles-pending"
+      ? { action: "restyle" }
+      : board.status === "storyboard-pending" && board.chosenStyleId
+        ? { action: "choose-style", styleId: board.chosenStyleId }
+        : board.status === "build-pending"
+          ? { action: "approve" }
+          : null;
+  if (!body) return null;
+  return (
+    <Button size="sm" icon={<RefreshCw size={12} />} disabled={busy} onClick={() => void act(body)}>
+      Try again
+    </Button>
   );
 }
 
@@ -90,8 +134,8 @@ function Waiting({ title, board }: { title: string; board: Board }) {
   const { status, recentlyActive } = useBridgeStore(useShallow((s) => ({ status: s.status, recentlyActive: s.recentlyActive })));
   return (
     <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
-      <LoaderCircle size={26} className="animate-spin text-accent" />
-      <h3 className="text-[15px] font-semibold">{title}</h3>
+      {board.waitingRequestId ? <LoaderCircle size={26} className="animate-spin text-accent" /> : null}
+      <h3 className="text-[15px] font-semibold">{board.waitingRequestId ? title : "Nothing is queued for Claude: use Try again above."}</h3>
       {board.waitingRequestId ? <ListenerHint status={status} recentlyActive={recentlyActive} /> : null}
     </div>
   );
@@ -436,8 +480,9 @@ export function BoardView() {
         </IconButton>
       </header>
       {(error || board?.lastError) && (
-        <div dir="auto" className="shrink-0 border-b border-danger/40 bg-danger/10 px-4 py-2 text-[12px] text-danger">
-          {board?.lastError ? `Claude could not do this step: ${board.lastError}` : error}
+        <div dir="auto" className="flex shrink-0 items-center gap-3 border-b border-danger/40 bg-danger/10 px-4 py-2 text-[12px] text-danger">
+          <span className="min-w-0 flex-1">{board?.lastError ? `Claude could not do this step: ${board.lastError}` : error}</span>
+          {board?.lastError && !board.waitingRequestId && <RetryButton board={board} />}
         </div>
       )}
       <main className="ms-scroll min-h-0 flex-1 overflow-auto">

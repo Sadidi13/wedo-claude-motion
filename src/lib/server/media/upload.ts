@@ -1,14 +1,15 @@
 /**
- * Importing a video into the media library from a streamed request body (POST /api/media/upload):
+ * Importing a file into the media library from a streamed request body (POST /api/media/upload):
  * the bytes go straight to `<id>/source.<ext>` (never held in memory), meta.json starts in the
- * "processing" state and ingest runs in the background.
+ * "processing" state and ingest runs in the background. The extension decides the kind (video,
+ * sound, image or font).
  */
 
 import { createWriteStream } from "node:fs";
 import { mkdir, rename, rm } from "node:fs/promises";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { VIDEO_EXTENSIONS, type MediaMeta } from "@/lib/media";
+import { AUDIO_EXTENSIONS, FONT_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, mediaKindForName, type MediaMeta } from "@/lib/media";
 import { MAX_MEDIA_UPLOAD_BYTES } from "../guard";
 import { startIngest } from "./ingest";
 import { mediaDir, mediaPaths, newMediaId, writeMeta } from "./store";
@@ -32,17 +33,25 @@ export function cleanFileName(raw: string | null): string {
   return name.slice(0, 120) || "video.mp4";
 }
 
+/** The lowercase extension when the library takes the file, else null. */
 export function extensionOf(name: string): string | null {
-  const ext = name.toLowerCase().split(".").pop() ?? "";
-  return (VIDEO_EXTENSIONS as readonly string[]).includes(ext) ? ext : null;
+  return mediaKindForName(name) ? (name.toLowerCase().split(".").pop() ?? null) : null;
 }
 
+const ACCEPTED = [
+  `videos (${VIDEO_EXTENSIONS.join(", ")})`,
+  `sound (${AUDIO_EXTENSIONS.join(", ")})`,
+  `images (${IMAGE_EXTENSIONS.join(", ")})`,
+  `fonts (${FONT_EXTENSIONS.join(", ")})`,
+].join(", ");
+
 /** Store the streamed file, start processing it, and return its (processing) meta. */
-export async function importVideo(body: ReadableStream<Uint8Array> | null, rawName: string | null): Promise<MediaMeta> {
+export async function importMedia(body: ReadableStream<Uint8Array> | null, rawName: string | null): Promise<MediaMeta> {
   if (!body) throw new MediaUploadError("The request has no body");
   const name = cleanFileName(rawName);
   const ext = extensionOf(name);
-  if (!ext) throw new MediaUploadError(`"${name}" is not a video file (${VIDEO_EXTENSIONS.join(", ")})`, 415);
+  const kind = mediaKindForName(name);
+  if (!ext || !kind) throw new MediaUploadError(`"${name}" is not a file the media library takes: ${ACCEPTED}`, 415);
 
   const id = newMediaId();
   await mkdir(mediaDir(id), { recursive: true });
@@ -52,7 +61,7 @@ export async function importVideo(body: ReadableStream<Uint8Array> | null, rawNa
   const limit = new Transform({
     transform(chunk: Buffer, _encoding, callback) {
       size += chunk.length;
-      if (size > MAX_MEDIA_UPLOAD_BYTES) callback(new MediaUploadError("The video is too large", 413));
+      if (size > MAX_MEDIA_UPLOAD_BYTES) callback(new MediaUploadError("The file is too large", 413));
       else callback(null, chunk);
     },
   });
@@ -68,6 +77,7 @@ export async function importVideo(body: ReadableStream<Uint8Array> | null, rawNa
 
   const meta: MediaMeta = {
     id,
+    kind,
     name,
     ext,
     size,
@@ -87,3 +97,6 @@ export async function importVideo(body: ReadableStream<Uint8Array> | null, rawNa
   void startIngest(id);
   return meta;
 }
+
+/** Older name, kept for callers that import footage. */
+export const importVideo = importMedia;

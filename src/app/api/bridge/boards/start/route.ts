@@ -1,7 +1,9 @@
 /**
- * POST /api/bridge/boards/start (editor) — the designer asked for a new video in
- * the Ask Claude tab: an empty board waiting for Claude's style frames, and a
- * storyboard request queued for whoever listens. Body `{ brief, stage? }`; 201 with the board.
+ * POST /api/bridge/boards/start (editor) — the designer asked for a new video in the New video
+ * wizard or the Ask Claude tab: an empty board waiting for Claude's style frames, and a storyboard
+ * request queued for whoever listens. Body: BoardStartSchema (`{ brief, stage?, references?, … }`,
+ * plus the wizard's kind, language, script, materials, style picks and media references); 201 with
+ * the board.
  */
 import { z } from "zod";
 import { BoardStartSchema, BridgeStateError, readJsonBody, startBoard } from "@/lib/server/bridge";

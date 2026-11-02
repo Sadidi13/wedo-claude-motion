@@ -77,8 +77,8 @@ export function mergeClips(lists: unknown[]): AudioClip[] {
 
 /**
  * Write each clip's source next to the job; returns the usable clips and why others were skipped.
- * A <Video>'s sound (src `media/<id>`) is read from the library's original file, for the ids the
- * project refers to (`mediaIds`).
+ * A library sound or a <Video>'s sound (src `media/<id>`) is read from the library's original file,
+ * for the ids the project refers to (`mediaIds`).
  */
 export async function prepareAudio(
   jobDir: string,
@@ -98,7 +98,7 @@ export async function prepareAudio(
       const mediaId = mediaIdOf(clip.src);
       if (mediaId) {
         const meta = mediaIds.includes(mediaId) ? await readMeta(mediaId) : null;
-        if (!meta) skipped.push(`${clip.key}: media/${mediaId} is not a video this project uses`);
+        if (!meta) skipped.push(`${clip.key}: media/${mediaId} is not a file this project uses`);
         else if (!meta.hasAudio) skipped.push(`${clip.key}: "${meta.name}" has no sound`);
         else inputs.push({ clip, file: mediaPaths.source(mediaId, meta.ext), length: meta.duration || undefined });
         continue;

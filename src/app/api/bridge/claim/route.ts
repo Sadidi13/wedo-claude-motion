@@ -11,7 +11,7 @@
  */
 import { parseScene } from "@/lib/parser";
 import type { BridgeClient } from "@/lib/types";
-import { buildBoardBrief, buildBrief, claimNextRequest, deliverableFor, finishRequest, readBoard, requireToken } from "@/lib/server/bridge";
+import { buildBoardBrief, buildBrief, claimNextRequest, deliverableFor, finishRequest, loadMaterialInfo, readBoard, requireToken } from "@/lib/server/bridge";
 
 function layerName(source: string | undefined, id: string): string | null {
   if (source === undefined) return null;
@@ -51,7 +51,7 @@ export async function POST(request: Request): Promise<Response> {
       layerName: null,
       project: { id: board.id, name: board.title, entry: "scene.jsx" },
       createdAt: record.createdAt,
-      brief: buildBoardBrief(record, board, client),
+      brief: buildBoardBrief(record, board, client, await loadMaterialInfo(board)),
       files: [],
     });
   }

@@ -1,4 +1,4 @@
-/** GET /api/media — every video in the media library (MediaMeta[], newest first; docs/VIDEO.md). */
+/** GET /api/media — every file in the media library (MediaMeta[] with `ref`, newest first; docs/VIDEO.md). */
 import { connection } from "next/server";
 import { mediaRef } from "@/lib/media";
 import { listMedia } from "@/lib/server/media";

@@ -12,7 +12,7 @@
  */
 
 import type { ProjectFile } from "@/lib/types";
-import { collectAssets, rewriteAssetReferences, rewriteCssAssetReferences } from "./assets";
+import { collectAssets, rewriteAssetReferences, rewriteCssAssetReferences, rewriteCssMediaReferences, rewriteMediaReferences } from "./assets";
 import { compileFile } from "./compile";
 import { LoadError } from "./errors";
 import { resolveSpecifier, type BuiltinName } from "./resolve";
@@ -61,7 +61,7 @@ export function createModuleSystem(options: ModuleSystemOptions): ModuleSystem {
   };
 
   const evaluateSource = (path: string, file: ProjectFile): ModuleRecord => {
-    const code = compileFile(path, rewriteAssetReferences(file.content, path, assets));
+    const code = compileFile(path, rewriteMediaReferences(rewriteAssetReferences(file.content, path, assets)));
     let factory: (require: RequireFn, module: ModuleRecord, exports: unknown, React: unknown) => void;
     try {
       factory = new Function("require", "module", "exports", "React", code) as typeof factory;
@@ -91,7 +91,7 @@ export function createModuleSystem(options: ModuleSystemOptions): ModuleSystem {
     let record: ModuleRecord;
     switch (file.kind) {
       case "css":
-        injectCss(path, rewriteCssAssetReferences(file.content, path, assets));
+        injectCss(path, rewriteCssMediaReferences(rewriteCssAssetReferences(file.content, path, assets)));
         record = { exports: {} };
         break;
       case "asset":

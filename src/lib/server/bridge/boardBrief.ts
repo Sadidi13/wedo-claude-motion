@@ -8,10 +8,33 @@
  */
 
 import path from "node:path";
-import { styleLibraryMarkdown } from "@/lib/ai";
-import type { Board, BoardAction, BoardReference, BridgeClient } from "@/lib/types";
+import { STYLE_LIBRARY, styleLibraryMarkdown } from "@/lib/ai";
+import type { MediaMeta } from "@/lib/media";
+import type { Board, BoardAction, BoardMaterial, BoardReference, BridgeClient, MaterialRole } from "@/lib/types";
+import { readMeta } from "../media/store";
+import { readTranscript, type Transcript } from "../media/transcribe";
 import { referencesDir } from "./references";
 import type { BridgeRequestRecord } from "./store";
+
+/** What the brief says about the board's materials, read from the media library before it is built. */
+export interface MaterialInfo {
+  metas: Record<string, MediaMeta>;
+  transcripts: Record<string, Transcript>;
+}
+
+/** Load the media details and transcripts of a board's materials (for buildBoardBrief). */
+export async function loadMaterialInfo(board: Board): Promise<MaterialInfo> {
+  const info: MaterialInfo = { metas: {}, transcripts: {} };
+  for (const material of board.materials ?? []) {
+    const meta = await readMeta(material.mediaId).catch(() => null);
+    if (meta) info.metas[meta.id] = meta;
+    if (meta?.transcript?.state === "ready") {
+      const transcript = await readTranscript(meta.id);
+      if (transcript) info.transcripts[meta.id] = transcript;
+    }
+  }
+  return info;
+}
 
 const STEP_LABEL: Record<BoardAction, string> = {
   new: "propose style frames for a new video",
@@ -167,8 +190,137 @@ function fence(code: string): string[] {
   return ["```jsx", code, "```"];
 }
 
-/** Markdown brief for a claimed storyboard request. */
-export function buildBoardBrief(record: BridgeRequestRecord, board: Board, client: BridgeClient): string {
+const KIND_TEXT: Record<NonNullable<Board["videoKind"]>, string> = {
+  motion: "motion graphics only: everything on screen is drawn in code, no footage",
+  footage:
+    "built around footage of a person speaking: the footage is the base layer (first in the Stage); captions, graphics, punch-ins and cuts go on top, timed to what is said",
+  chat: "set up in a conversation with the designer; the brief below is its summary",
+};
+
+const ROLE_LABEL: Record<MaterialRole, string> = {
+  footage: "Footage",
+  voice: "Voice-over",
+  music: "Music",
+  sfx: "Sound effect",
+  image: "Image",
+  logo: "Logo",
+  font: "Font",
+};
+
+/** Per brief: transcripts beyond this are cut (a long talk would crowd out everything else). */
+const MAX_TRANSCRIPT_CHARS = 24_000;
+
+const secs = (value: number) => `${Number(value.toFixed(2))}s`;
+
+/** One line about a material and how scene code uses it. */
+function describeMaterial(material: BoardMaterial, meta: MediaMeta | undefined): string[] {
+  const head = `- ${ROLE_LABEL[material.role]} "${material.name}": \`${material.ref}\``;
+  const note = material.note ? ` Note: ${material.note.replace(/\s+/g, " ")}` : "";
+  const label = ROLE_LABEL[material.role];
+  switch (material.kind) {
+    case "video": {
+      const facts = meta ? ` (video, ${secs(meta.duration)}, ${meta.width}x${meta.height}, ${meta.hasAudio ? "with sound" : "silent"})` : " (video)";
+      const end = meta ? Number(meta.duration.toFixed(2)) : 5;
+      return [`${head}${facts}.${note}`, `  Use: \`<Sprite start={0} end={${end}} data-layer-name="${label}"><Video src="${material.ref}" /></Sprite>\``];
+    }
+    case "audio": {
+      const facts = meta ? ` (sound, ${secs(meta.duration)})` : " (sound)";
+      const level = material.role === "music" ? " volume={0.3} fadeOut={1.5}" : "";
+      return [`${head}${facts}.${note}`, `  Use: \`<Audio src="${material.ref}" start={0}${level} data-layer-name="${label}" />\``];
+    }
+    case "image": {
+      const facts = meta?.width ? ` (image, ${meta.width}x${meta.height})` : " (image)";
+      return [`${head}${facts}.${note}`, `  Use: \`<img src="${material.ref}" alt="" style={{ position: "absolute", … }} />\``];
+    }
+    case "font": {
+      const family = meta?.fontFamily ?? material.name.replace(/\.[^.]+$/, "");
+      const weight = meta?.fontWeight ?? 400;
+      const style = meta?.fontStyle ?? "normal";
+      return [
+        `${head} (font: family "${family}", weight ${weight}${style === "italic" ? ", italic" : ""}).${note}`,
+        `  Use: in a CSS file the scene imports, \`@font-face { font-family: "${family}"; src: url("${material.ref}"); font-weight: ${weight}; font-style: ${style}; }\`, then \`font-family: "${family}", …\` with a fallback.`,
+      ];
+    }
+  }
+}
+
+/** What is said in a footage or voice file: segments always, word timings for the build. */
+function describeTranscript(material: BoardMaterial, transcript: Transcript, withWords: boolean, budget: { chars: number }): string[] {
+  const corrected = transcript.segments.some((segment) => segment.edited);
+  const lines = [
+    `### What is said in "${material.name}" (Whisper${corrected ? ", corrected by the designer" : ""}; seconds from the start of the file)`,
+    "",
+  ];
+  for (const segment of transcript.segments) {
+    const line = `- [${segment.start.toFixed(2)}-${segment.end.toFixed(2)}] ${segment.text}`;
+    if ((budget.chars -= line.length) < 0) {
+      lines.push("- … (the rest is left out of this brief)");
+      return [...lines, ""];
+    }
+    lines.push(line);
+  }
+  if (withWords) {
+    lines.push("", "Word timings (start of each word, for captions that follow the speech; spelling as Whisper heard it, the segments above are the text to show):", "");
+    for (const segment of transcript.segments) {
+      const line = `- ${segment.words.map((word) => `${word.start.toFixed(2)} ${word.word}`).join(" · ")}`;
+      if (segment.words.length === 0) continue;
+      if ((budget.chars -= line.length) < 0) {
+        lines.push("- …");
+        break;
+      }
+      lines.push(line);
+    }
+  }
+  return [...lines, ""];
+}
+
+/** The wizard's setup: kind, language, materials (with transcripts), script and picked style directions. */
+function setupSections(board: Board, deliverable: BoardDeliverable, info: MaterialInfo | undefined): string[] {
+  const parts: string[] = [];
+  if (board.videoKind || board.language) {
+    parts.push("## What the designer set up", "");
+    if (board.videoKind) parts.push(`- Kind: ${KIND_TEXT[board.videoKind]}.`);
+    if (board.language) parts.push(`- Language of the words (spoken and on screen): ${board.language}.`);
+    parts.push("");
+  }
+  const materials = board.materials ?? [];
+  if (materials.length) {
+    parts.push(
+      "## Materials",
+      "",
+      "Files from the designer's media library. Use every one in the video (style frames: the ones that set the look, such as footage, logo and font). Write each `media/…` reference exactly as given; never a file path or a URL.",
+      "",
+    );
+    for (const material of materials) parts.push(...describeMaterial(material, info?.metas[material.mediaId]));
+    parts.push("");
+    const budget = { chars: MAX_TRANSCRIPT_CHARS };
+    for (const material of materials) {
+      const transcript = info?.transcripts[material.mediaId];
+      if (transcript && (material.role === "footage" || material.role === "voice")) {
+        parts.push(...describeTranscript(material, transcript, deliverable === "scene", budget));
+      }
+    }
+  }
+  if (board.script) parts.push("## Script and key messages (the designer's words; on-screen text comes from here)", "", board.script, "");
+  const hints = (board.styleHints ?? []).map((name) => STYLE_LIBRARY.find((style) => style.name === name)).filter((style) => style !== undefined);
+  if (hints.length && deliverable === "styles") {
+    parts.push(
+      "## Style directions the designer picked from the library",
+      "",
+      `Make one style frame from each${hints.length < 3 ? ", and add your own to reach 3" : ""}:`,
+      "",
+      ...hints.map((style) => `- **${style.name}** (${style.group}): ${style.recipe}.`),
+      "",
+    );
+  }
+  return parts;
+}
+
+/**
+ * Markdown brief for a claimed storyboard request. `info` (loadMaterialInfo) adds the lengths, sizes,
+ * font names and transcripts of the board's materials.
+ */
+export function buildBoardBrief(record: BridgeRequestRecord, board: Board, client: BridgeClient, info?: MaterialInfo): string {
   const action = record.board?.action ?? "new";
   const deliverable = deliverableFor(action);
   const m = board.meta;
@@ -199,6 +351,7 @@ export function buildBoardBrief(record: BridgeRequestRecord, board: Board, clien
     "",
     board.brief,
     "",
+    ...setupSections(board, deliverable, info),
   ];
   if (board.notes.length) {
     parts.push("## The designer's notes (oldest first)", "");

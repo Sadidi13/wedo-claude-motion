@@ -42,7 +42,7 @@ export {
   readBoard,
   startBoard,
 } from "./boards";
-export { buildBoardBrief, deliverableFor, type BoardDeliverable } from "./boardBrief";
+export { buildBoardBrief, deliverableFor, loadMaterialInfo, type BoardDeliverable, type MaterialInfo } from "./boardBrief";
 export { readReferenceFile, referenceFile, referencesDir } from "./references";
 export {
   BridgePushSchema,

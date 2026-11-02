@@ -303,10 +303,9 @@ export function AskClaudeTab() {
       <div className="flex shrink-0 flex-col gap-2 border-t border-border px-3 py-2">
         {transport === "desktop" && bridgeStatus !== null && !desktopConnected && !recentlyActive && !bridgeUnreachable && (
           <p dir="auto" className="rounded border border-accent-2/40 bg-accent-2/10 px-2 py-1 text-[11px] leading-[1.45] text-accent-2">
-            Nobody is listening. Start the autopilot by double-clicking{" "}
-            <span className="font-medium">scripts/start-autopilot.cmd</span>: it answers every request on its own and costs
-            nothing while waiting. Or, in the Claude chat, say <span className="font-medium">“check Claude Motion”</span> after
-            sending. Requests you send now wait in the queue.
+            Nobody is listening. Turn the <span className="font-medium">Autopilot</span> on in the top bar: it answers every
+            request on its own and costs nothing while waiting. Or, in the Claude chat, say{" "}
+            <span className="font-medium">“check Claude Motion”</span> after sending. Requests you send now wait in the queue.
           </p>
         )}
         {transport === "desktop" && bridgeUnreachable && (

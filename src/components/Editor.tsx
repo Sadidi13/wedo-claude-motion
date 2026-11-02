@@ -20,6 +20,7 @@ import { QualityDialog } from "./QualityDialog";
 import { SecondTabBanner } from "./SecondTabBanner";
 import { Timeline } from "./Timeline";
 import { TopBar } from "./TopBar";
+import { NewVideoWizard } from "./wizard/NewVideoWizard";
 
 const TOPBAR_HEIGHT = 44;
 const LAYERS_WIDTH = 280;
@@ -90,6 +91,7 @@ export default function Editor() {
       {dialog === "export" && <ExportDialog onClose={closeDialog} />}
       {dialog === "quality" && <QualityDialog onClose={closeDialog} />}
       {dialog === "history" && <HistoryDialog onClose={closeDialog} />}
+      <NewVideoWizard />
       <BoardView />
       <SecondTabBanner />
     </div>

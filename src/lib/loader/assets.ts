@@ -12,6 +12,7 @@
  * Template literals with interpolation and paths built at runtime are not rewritten.
  */
 
+import { URL_LOADED_EXTENSIONS, mediaUrls } from "@/lib/media";
 import type { ProjectFile } from "@/lib/types";
 import { normalisePath, relativeSpecifier } from "./paths";
 
@@ -46,6 +47,23 @@ export function rewriteAssetReferences(source: string, fromPath: string, assets:
     }
   }
   return out;
+}
+
+const MEDIA_URL_EXTENSIONS = URL_LOADED_EXTENSIONS.join("|");
+const MEDIA_LITERAL = new RegExp(`(["'\`])(?:\\./)?media/([a-z0-9]{12})\\.(?:${MEDIA_URL_EXTENSIONS})\\1`, "g");
+const MEDIA_CSS_URL = new RegExp(`url\\(\\s*(["']?)(?:\\./)?media/([a-z0-9]{12})\\.(?:${MEDIA_URL_EXTENSIONS})\\1\\s*\\)`, "g");
+
+/**
+ * Images and fonts from the media library (`"media/<id>.png"`, `url(media/<id>.woff2)`) load by URL:
+ * point them at the server's /api/media/<id>/file. Video and sound references stay as written;
+ * <Video> and <Audio> resolve those themselves (frames for exports, the mix for sound).
+ */
+export function rewriteMediaReferences(source: string): string {
+  return source.replace(MEDIA_LITERAL, (_match, quote: string, id: string) => `${quote}${mediaUrls.file(id)}${quote}`);
+}
+
+export function rewriteCssMediaReferences(css: string): string {
+  return css.replace(MEDIA_CSS_URL, (_match, _quote: string, id: string) => `url("${mediaUrls.file(id)}")`);
 }
 
 export function rewriteCssAssetReferences(css: string, fromPath: string, assets: AssetRef[]): string {

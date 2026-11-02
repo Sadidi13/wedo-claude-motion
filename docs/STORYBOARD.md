@@ -29,7 +29,7 @@ storyboard again.
 | Who starts it | How |
 |---|---|
 | Claude in a chat or Code session | writes the style frames and calls `board-styles` / `propose_styles`; that creates the board and opens the storyboard view |
-| The designer in the editor | **Ask Claude → New scene** starts an empty board (`POST /api/bridge/boards/start`) and queues the style step for whoever listens |
+| The designer in the editor | the **New video** wizard (below), or **Ask Claude → New scene**, starts an empty board (`POST /api/bridge/boards/start`) and queues the style step for whoever listens |
 
 Each decision taken in the editor queues a bridge request with a `board` field
 (`{ boardId, action, note? }`), so the Code tab, the chat connector and the autopilot all receive it
@@ -40,6 +40,26 @@ queued.
 
 `new` without `--board` is refused. `--skip-storyboard` (`skip_storyboard` in the chat tool) is for
 when the user explicitly asked for no storyboard.
+
+## The New video wizard
+
+The top bar's **New video** button (and `?new=1`, which `motion-bridge launch` opens) starts every
+video in four steps (`src/components/wizard/NewVideoWizard.tsx`, state in `src/store/wizardStore.ts`):
+
+1. **Kind**: motion graphics only, or footage of a person (a conversation with Claude comes next);
+   what the video is about, the format (9:16, 16:9, 1:1, 4:5), its length and language.
+2. **Content**: footage, a voice-over or music, images and a logo, fonts, each uploaded to the media
+   library as it is added ([VIDEO.md](VIDEO.md)), with its use (footage, voice-over, music, logo, …)
+   and an optional note; footage and voice-overs are transcribed by Whisper and can be corrected
+   there. With footage, its length becomes the video's. A script box takes the exact on-screen words.
+3. **Style**: up to three directions from the style library (search, grouped), references to match
+   (also uploaded to the library, so any size), or neither and Claude proposes.
+4. **Start**: a summary, and the autopilot switch when nobody listens.
+
+The board keeps the setup (`videoKind`, `language`, `script`, `materials`, `styleHints`). The brief of
+every step, the build included, lists the materials with their `media/…` references, lengths, sizes
+and font names and how scene code uses each, the transcript (segments; word timings for the build),
+the script, and for the style step the picked directions ("one style frame from each").
 
 ## Validation
 

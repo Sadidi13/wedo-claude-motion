@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectFile } from "@/lib/types";
-import { assetReferenceVariants, collectAssets, rewriteAssetReferences, rewriteCssAssetReferences } from "../assets";
+import {
+  assetReferenceVariants,
+  collectAssets,
+  rewriteAssetReferences,
+  rewriteCssAssetReferences,
+  rewriteCssMediaReferences,
+  rewriteMediaReferences,
+} from "../assets";
 
 const LOGO = "data:image/png;base64,iVBORw0KGgo=";
 const BG = "data:image/jpeg;base64,/9j/4AAQ";
@@ -67,5 +74,26 @@ describe("rewriteCssAssetReferences", () => {
   it("resolves relative to the css file's directory", () => {
     const out = rewriteCssAssetReferences(`.a{background:url(../assets/bg.jpg)}`, "styles/main.css", assets);
     expect(out).toBe(`.a{background:url("${BG}")}`);
+  });
+});
+
+describe("media library references", () => {
+  it("points images and fonts at the server's file route", () => {
+    const src = `<img src="media/a1b2c3d4e5f6.png" /><img src={'./media/a1b2c3d4e5f6.svg'} />; const f = \`media/z9y8x7w6v5u4.woff2\`;`;
+    expect(rewriteMediaReferences(src)).toBe(
+      `<img src="/api/media/a1b2c3d4e5f6/file" /><img src={'/api/media/a1b2c3d4e5f6/file'} />; const f = \`/api/media/z9y8x7w6v5u4/file\`;`,
+    );
+  });
+
+  it("leaves video and sound references for <Video> and <Audio>, and anything that is not a whole reference", () => {
+    const src = `<Video src="media/k3f9x2abcd12.mp4" /><Audio src="media/p0q1r2s3t4u5.mp3" />; const x = "see media/a1b2c3d4e5f6.png"; const y = "media/short.png";`;
+    expect(rewriteMediaReferences(src)).toBe(src);
+  });
+
+  it("rewrites url() in CSS, quoted or not", () => {
+    const css = `@font-face{font-family:"Brand";src:url(media/z9y8x7w6v5u4.ttf)} .b{background:url( "media/a1b2c3d4e5f6.webp" )} .c{background:url(media/k3f9x2abcd12.mp4)}`;
+    expect(rewriteCssMediaReferences(css)).toBe(
+      `@font-face{font-family:"Brand";src:url("/api/media/z9y8x7w6v5u4/file")} .b{background:url("/api/media/a1b2c3d4e5f6/file")} .c{background:url(media/k3f9x2abcd12.mp4)}`,
+    );
   });
 });

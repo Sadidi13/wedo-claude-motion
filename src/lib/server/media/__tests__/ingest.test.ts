@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildIngestArgs, frameRateFor, frameSide, jpegSize, parseProbe } from "../ingest";
+import { buildIngestArgs, frameRateFor, frameSide, jpegSize, parseProbe, svgSize } from "../ingest";
 import { parseRange } from "../range";
 
 // ffmpeg -hide_banner -i talk.mp4 (a 4K vertical camera file)
@@ -65,6 +65,15 @@ describe("frames", () => {
     const sof0 = [0xff, 0xc0, 0x00, 0x11, 0x08, 0x0a, 0x00, 0x05, 0xa0, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01];
     expect(jpegSize(new Uint8Array([0xff, 0xd8, ...app0, ...sof0]))).toEqual({ width: 1440, height: 2560 });
     expect(jpegSize(new Uint8Array([0x89, 0x50, 0x4e, 0x47]))).toBeNull();
+  });
+});
+
+describe("svgSize", () => {
+  it("reads width and height, or the viewBox", () => {
+    expect(svgSize('<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="512px" height="128"><rect/></svg>')).toEqual({ width: 512, height: 128 });
+    expect(svgSize('<svg viewBox="0 0 240.5 80" xmlns="http://www.w3.org/2000/svg"></svg>')).toEqual({ width: 241, height: 80 });
+    expect(svgSize('<svg width="100%" viewBox="0,0,300,150"></svg>')).toEqual({ width: 300, height: 150 });
+    expect(svgSize("<svg></svg>")).toEqual({ width: 0, height: 0 });
   });
 });
 

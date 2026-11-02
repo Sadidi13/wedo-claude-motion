@@ -17,6 +17,7 @@ import { Button } from "./ui/Button";
 import { cx } from "./ui/cx";
 import { downloadBlob } from "./ui/download";
 import { IconButton } from "./ui/IconButton";
+import { NewVideoButton } from "./wizard/NewVideoWizard";
 
 interface TopBarProps {
   onImport: () => void;
@@ -134,6 +135,7 @@ export function TopBar({ onImport, onExport, onCheck, onHistory }: TopBarProps) 
       {project ? <ProjectName name={project.name} onRename={setProjectName} /> : <span className="text-muted">Loading…</span>}
 
       <div className="ml-2 flex items-center gap-1">
+        <NewVideoButton />
         <Button size="sm" icon={<FolderOpen size={14} />} onClick={onImport} title="Import a Claude Design zip, HTML or JSX scene">
           Import
         </Button>

@@ -124,7 +124,7 @@ export function chromiumSandboxEnabled(
   return !(env.MOTION_STUDIO_CHROMIUM_NO_SANDBOX === "1" || (platform === "linux" && uid === 0));
 }
 
-const MEDIA_REQUEST = /^\/api\/media\/([a-z0-9]{12})(?:\/frames\/\d{1,7})?$/;
+const MEDIA_REQUEST = /^\/api\/media\/([a-z0-9]{12})(?:\/frames\/\d{1,7}|\/file)?$/;
 
 /** The media library ids a project's code refers to (`media/<id>`), for the render allowlist. */
 export function projectMediaIds(project: Pick<Project, "files">): string[] {
@@ -138,8 +138,8 @@ export function projectMediaIds(project: Pick<Project, "files">): string[] {
 
 /**
  * Network policy while rendering untrusted scene code: on the app's own origin only the page
- * itself, the app's bundles (/_next/*), this job's project and the metadata and frames of the
- * library videos the project refers to (`mediaIds`) may load, so the scene cannot call the rest
+ * itself, the app's bundles (/_next/*), this job's project and the metadata, frames and files of
+ * the library media the project refers to (`mediaIds`) may load, so the scene cannot call the rest
  * of /api (start more exports, queue work for Claude, read projects). Other origins (web fonts,
  * images) stay allowed so exports look like the editor.
  */
@@ -305,18 +305,23 @@ async function renderRange(
 }
 
 /**
- * Ask the server for one video's metadata and first frame before any page does. Under `next dev`
- * the first request to a route compiles it, which can take longer than SEEK_TIMEOUT_MS when every
- * render page asks at once; afterwards each frame is a plain file read. Failures are left to the
- * pages to report.
+ * Ask the server for each medium's metadata and first frame (videos) or first bytes (other files)
+ * before any page does. Under `next dev` the first request to a route compiles it, which can take
+ * longer than SEEK_TIMEOUT_MS when every render page asks at once; afterwards each frame is a plain
+ * file read. Failures are left to the pages to report.
  */
 export async function warmMediaRoutes(origin: string, mediaIds: readonly string[]): Promise<void> {
+  const get = (route: string, headers?: Record<string, string>) =>
+    fetch(new URL(route, origin), { headers, signal: AbortSignal.timeout(READY_TIMEOUT_MS) })
+      .then(async (response) => {
+        const body = response.ok ? await response.json().catch(() => null) : null;
+        return body as { kind?: string } | null;
+      })
+      .catch(() => null);
   for (const id of mediaIds) {
-    for (const route of [`/api/media/${id}`, `/api/media/${id}/frames/0`]) {
-      await fetch(new URL(route, origin), { signal: AbortSignal.timeout(READY_TIMEOUT_MS) })
-        .then((response) => response.arrayBuffer())
-        .catch(() => undefined);
-    }
+    const meta = await get(`/api/media/${id}`);
+    if ((meta?.kind ?? "video") === "video") await get(`/api/media/${id}/frames/0`);
+    else await get(`/api/media/${id}/file`, { Range: "bytes=0-1023" });
   }
 }
 

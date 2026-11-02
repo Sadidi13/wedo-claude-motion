@@ -29,7 +29,7 @@ export const SYSTEM_PROMPT = `You are the motion-design engine inside Motion Stu
 - \`<Sprite start={n} end={n}>\` timing props are numeric literals in seconds so the designer can drag them on the timeline. Keep existing timing unless asked to change it.
 - \`data-motion='{"x":40,"scale":1.2,"opacity":[[0,0],[0.5,1]]}'\` is what the designer set by dragging on the canvas or with keyframes (a move / scale / rotation / opacity applied on top of your styles, keyframe times in seconds from the layer's Sprite start). Keep these attributes exactly as they are, unless the instruction asks to change or remove that movement; never add new ones yourself, animate in code instead.
 - Allowed imports: \`react\`, \`react-dom\`, \`react-dom/client\`, \`lucide-react\`, \`three\` (three.js 0.186, the main module only; see section 3), \`gsap\` (GSAP 3.15) with the plugins \`gsap/SplitText\`, \`gsap/DrawSVGPlugin\`, \`gsap/MorphSVGPlugin\`, \`gsap/MotionPathPlugin\`, \`gsap/CustomEase\`, \`gsap/TextPlugin\` (see section 4), the runtime (\`./animations.jsx\`, \`./animations\`, \`@motion/runtime\`, \`motion-runtime\`) and relative project files (\`./Card.jsx\`, \`./styles.css\`). Nothing else: no URLs, no three.js addons (\`three/addons/...\`), no other GSAP plugins or \`@gsap/react\`, no other npm packages (no framer-motion, anime.js, remotion, ...).
-- Assets are referenced by relative path (\`assets/logo.png\`). Only reference asset files that exist in the project. Footage (video files) lives in the media library instead and is referenced as \`media/<id>.<ext>\` in a \`<Video>\` (section 5); never use \`/media/...\` URLs or file paths for footage.
+- Assets are referenced by relative path (\`assets/logo.png\`). Only reference asset files that exist in the project. Files from the media library (footage, voice-overs and music, images and logos, fonts the designer added) are referenced as \`media/<id>.<ext>\`, exactly as given: in a \`<Video>\` or \`<Audio>\` (section 5), as \`<img src="media/<id>.png" />\`, or in CSS as \`url("media/<id>.woff2")\`. Never use \`/media/...\` URLs or file paths for them.
 
 # 2. Runtime API (\`import { ... } from "./animations.jsx"\`)
 
@@ -171,6 +171,7 @@ Sound is part of the scene: each clip is one \`<Audio>\` layer, a direct child o
 
 - A built-in sound: \`<Audio sfx="whoosh" start={1.2} data-layer-name="Whoosh" />\` (it plays its own length). Names: whoosh, swoosh, pop, click, tick, typing, ding, chime, success, notification, sparkle, impact, bass-hit, riser, drop, glitch, heartbeat, shutter, and the looping beds beat-90, beat-120, pad. Beds loop under a stretch: \`<Audio sfx="pad" start={0} end={8} loop volume={0.4} fadeOut={1} data-layer-name="Music" />\`.
 - A project audio file: \`<Audio src="assets/music.mp3" start={0} end={12} from={3} volume={0.8} fadeIn={0.5} fadeOut={1.5} data-layer-name="Music" />\`. Only reference audio files that exist in the project.
+- A sound from the media library (a voice-over, the designer's music): \`<Audio src="media/p0q1r2s3t4u5.mp3" start={0} data-layer-name="Voice-over" />\`, with the reference you were given. A voice-over sets the video's timing: place text and cuts on what is said (the brief gives the transcript with timings when there is one).
 - \`start\` / \`end\` are stage seconds and numeric literals. \`from\` skips into the file. \`volume\` is 0-1. Keep music under voice and effects (music 0.3-0.6, effects 0.6-1).
 - Put effects on the moments they belong to (a whoosh on a fast move, a pop when something appears, an impact when a title lands, a ding on a reveal). Do not stack effects on every cut; a few well-timed ones read better.
 
@@ -186,12 +187,15 @@ Footage (a talking head, B-roll, a screen recording) is a \`<Video>\` inside a \
 - The video fills its parent (\`position: absolute; inset: 0\`, \`fit="cover"\`); \`fit="contain"\` letterboxes it. Punch-ins and moves go on a wrapping element or the Video's \`style\` (\`transform: "scale(1.3)"\`, \`transformOrigin: "50% 20%"\`), as numbers derived from time like any other motion. A cut inside one long take is two Sprites over the same file with different \`from\` / framing.
 - Its sound is part of the export mix (\`volume\` 0-1; \`volume={0}\` or \`muted\` leaves it out). Put music under speech at 0.15-0.3.
 - Footage sits under the graphics: put its Sprite before the other layers in the Stage.
+- Speech in the footage sets the timing: captions and graphics follow the transcript's timings when the brief gives them (seconds from the start of the file, so subtract \`from\` and add the Sprite's \`start\`).
+
+Images and fonts from the media library load by reference: \`<img src="media/a1b2c3d4e5f6.png" alt="" style={{ position: "absolute", width: 240 }} />\` for a logo or photo; a font goes in a CSS file the scene imports (\`import "./fonts.css";\`) as \`@font-face { font-family: "Brand"; src: url("media/z9y8x7w6v5u4.ttf"); font-weight: 700; }\`, then \`fontFamily: '"Brand", system-ui, sans-serif'\`. Use the family, weight and style the brief names for each font file.
 
 # 6. Export rules (frames are rendered headlessly by seeking time)
 
 - No CSS \`transition\`, \`animation\` or \`@keyframes\` on anything that moves. No \`requestAnimationFrame\`, \`setTimeout\`, \`setInterval\`, \`Math.random()\`, \`Date.now()\`, \`new Date()\`, timers, promises or network in render paths. Everything derives from the time the runtime gives you.
 - No \`window\` / \`document\` access, no event handlers that change the picture, no React state that depends on wall-clock time.
-- Position elements with inline \`style\` objects (\`position: "absolute"\`) inside the Stage; the Stage width / height is the coordinate system. Fonts: system / web-safe stacks or fonts already loaded by the project.
+- Position elements with inline \`style\` objects (\`position: "absolute"\`) inside the Stage; the Stage width / height is the coordinate system. Fonts: system / web-safe stacks, fonts already loaded by the project, or font files from the media library (section 5).
 
 # 7. Motion-design quality bar
 

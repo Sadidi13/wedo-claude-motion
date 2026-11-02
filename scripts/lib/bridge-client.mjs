@@ -484,8 +484,8 @@ export async function showInEditor(eventId) {
 export const NEXT_STEP_NOTE = {
   fa:
     "اگر تغییری می‌خواهی، آن را در WeDo Claude Motion در تب Ask Claude بنویس و بعد اینجا بنویس «کلاد موشن رو چک کن». " +
-    "یا اتوپایلوت را باز بگذار (فایل scripts/start-autopilot.cmd) تا تغییرها خودکار انجام شوند. تغییر را همین‌جا هم می‌توانی از من بخواهی.",
+    "یا اتوپایلوت را روشن بگذار (دکمهٔ Autopilot بالای ویرایشگر) تا تغییرها خودکار انجام شوند. تغییر را همین‌جا هم می‌توانی از من بخواهی.",
   en:
     'To change it, type in the Ask Claude tab of WeDo Claude Motion, then write "check Claude Motion" here. ' +
-    "Or keep the autopilot open (scripts/start-autopilot.cmd) and changes are applied automatically. You can also ask me for the change right here.",
+    "Or keep the autopilot on (the Autopilot button at the top of the editor) and changes are applied automatically. You can also ask me for the change right here.",
 };

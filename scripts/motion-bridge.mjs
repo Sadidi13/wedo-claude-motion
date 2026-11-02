@@ -14,8 +14,8 @@
  *   start [--no-open] [--wait <s>] start the editor's server if needed and open the editor
  *   open [--wait <s>]              open the editor in the browser (waiting for a starting server)
  *   status                         is the server up, is anyone listening, what is open
- *   media [<video file>]           import footage into the media library and print its
- *                                  `media/<id>.<ext>` ref for <Video src> (no file: list the library)
+ *   media [<file>]                 import a video, sound, image or font into the media library and print
+ *                                  its `media/<id>.<ext>` ref and how to use it (no file: list the library)
  *   contract                       write the authoring contract to .motion-bridge/contract.md
  *   project                        write the open project to .motion-bridge/project/
  *   wait                           block until the editor queues a request, claim it,
@@ -684,10 +684,19 @@ async function cmdAutopilot(positional) {
   else console.log(`Autopilot: ${result.running ? "running" : "not running"} · ${result.state}${result.message ? ` · ${result.message}` : ""}${result.model ? ` · ${result.model}` : ""}`);
 }
 
+/** One line about a library file, by kind. */
+function describeMedia(m) {
+  const kind = m.kind ?? "video";
+  if (kind === "font") return `font "${m.fontFamily ?? "?"}" ${m.fontWeight ?? ""} ${m.fontStyle ?? ""}`.trim();
+  if (kind === "image") return `image ${m.width}x${m.height}`;
+  if (kind === "audio") return `sound ${m.duration.toFixed(2)}s`;
+  return `video ${m.duration.toFixed(2)}s ${m.width}x${m.height} ${m.hasAudio ? "with sound" : "silent"}`;
+}
+
 /**
- * `media <video file>`: import footage into the media library (streamed, any size) and print the
- * `media/<id>.<ext>` reference scene code uses in <Video src>. Waits until its frames are ready.
- * `media` alone lists the library.
+ * `media <file>`: import a video, sound, image or font into the media library (streamed, any size)
+ * and print the `media/<id>.<ext>` reference scene code uses (<Video src>, <Audio src>, <img src>,
+ * CSS url()). Waits until it is ready. `media` alone lists the library.
  */
 async function cmdMedia(positional) {
   await ensureServer();
@@ -695,7 +704,7 @@ async function cmdMedia(positional) {
   if (!file) {
     const list = await (await fetch(`${BASE}/api/media`)).json();
     if (!list.length) console.log("The media library is empty.");
-    for (const m of list) console.log(`${m.ref}  ${m.state}  ${m.duration.toFixed(2)}s  ${m.width}x${m.height}  ${m.hasAudio ? "sound" : "silent"}  "${m.name}"`);
+    for (const m of list) console.log(`${m.ref}  ${m.state}  ${describeMedia(m)}  "${m.name}"`);
     return;
   }
   const local = path.resolve(file);
@@ -710,19 +719,28 @@ async function cmdMedia(positional) {
   });
   const uploaded = await response.json().catch(() => ({}));
   if (response.status !== 201) throw new CliError(`Upload failed: ${uploaded.error ?? `HTTP ${response.status}`}`);
-  process.stdout.write("Preparing the preview copy and the export frames");
+  const kind = uploaded.kind ?? "video";
+  process.stdout.write(kind === "video" ? "Preparing the preview copy and the export frames" : "Reading the file");
   let meta = uploaded;
   while (meta.state === "processing") {
-    await sleep(2000);
+    await sleep(kind === "video" ? 2000 : 500);
     process.stdout.write(".");
     meta = await (await fetch(`${BASE}/api/media/${uploaded.id}`)).json();
   }
   process.stdout.write("\n");
-  if (meta.state !== "ready") throw new CliError(`The video could not be prepared: ${meta.error ?? meta.state}`);
+  if (meta.state !== "ready") throw new CliError(`The file could not be prepared: ${meta.error ?? meta.state}`);
   console.log(`ref:      ${meta.ref}`);
-  console.log(`length:   ${meta.duration.toFixed(3)} s, ${meta.width}x${meta.height}, ${meta.sourceFps || "?"} fps, ${meta.hasAudio ? "with sound" : "no sound"}`);
-  console.log(`frames:   ${meta.frameCount} at ${meta.frameRate} fps, ${meta.frameWidth}x${meta.frameHeight}`);
-  console.log(`use:      <Sprite start={0} end={${meta.duration.toFixed(2)}}><Video src="${meta.ref}" /></Sprite>`);
+  console.log(`what:     ${describeMedia(meta)}`);
+  if (kind === "video") {
+    console.log(`frames:   ${meta.frameCount} at ${meta.frameRate} fps, ${meta.frameWidth}x${meta.frameHeight}`);
+    console.log(`use:      <Sprite start={0} end={${meta.duration.toFixed(2)}}><Video src="${meta.ref}" /></Sprite>`);
+  } else if (kind === "audio") {
+    console.log(`use:      <Audio src="${meta.ref}" start={0} data-layer-name="Voice-over" />`);
+  } else if (kind === "image") {
+    console.log(`use:      <img src="${meta.ref}" alt="" style={{ position: "absolute", ... }} />`);
+  } else {
+    console.log(`use:      in a CSS file: @font-face { font-family: "${meta.fontFamily}"; src: url("${meta.ref}"); font-weight: ${meta.fontWeight ?? 400}; }`);
+  }
 }
 
 const COMMANDS = {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { frameAt, isVideoFileName, mediaIdOf, mediaIdsIn, mediaRef } from "../media";
+import { frameAt, isVideoFileName, mediaIdOf, mediaIdsIn, mediaKindForName, mediaKindOf, mediaRef } from "../media";
 
 describe("media references", () => {
   it("reads the id of a media/<id>[.ext] reference", () => {
@@ -28,6 +28,17 @@ describe("media references", () => {
     expect(isVideoFileName("Talk.MP4")).toBe(true);
     expect(isVideoFileName("clip.mov")).toBe(true);
     expect(isVideoFileName("song.mp3")).toBe(false);
+  });
+
+  it("gives every file the library takes its kind", () => {
+    expect(mediaKindForName("Talk.MP4")).toBe("video");
+    expect(mediaKindForName("voice over.m4a")).toBe("audio");
+    expect(mediaKindForName("logo.SVG")).toBe("image");
+    expect(mediaKindForName("Vazirmatn-Bold.woff2")).toBe("font");
+    expect(mediaKindForName("notes.txt")).toBeNull();
+    expect(mediaKindForName("no-extension")).toBeNull();
+    expect(mediaKindOf({})).toBe("video");
+    expect(mediaKindOf({ kind: "font" })).toBe("font");
   });
 });
 
