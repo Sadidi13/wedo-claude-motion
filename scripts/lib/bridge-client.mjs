@@ -264,6 +264,13 @@ export async function answer(id, body) {
   return result.json;
 }
 
+/** Claude's turn of the New video wizard's conversation: `{ reply, done, order? }`. */
+export async function answerIntake(id, body) {
+  const result = await request("POST", `/api/bridge/intake/${encodeURIComponent(id)}`, { body, auth: true });
+  if (result.status !== 200) throw failure(result, "conversation reply");
+  return result.json;
+}
+
 /** Decline a request with a short reason shown in the editor. */
 export async function decline(id, reason) {
   const result = await request("POST", `/api/bridge/requests/${encodeURIComponent(id)}/result`, {

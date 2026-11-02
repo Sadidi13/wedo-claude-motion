@@ -5,7 +5,7 @@
  * /api/bridge/autopilot. Its panel shows the model, the efforts and the last lines of the log, so
  * no console window is needed.
  */
-import { Bot, LogIn, Power, PowerOff, X } from "lucide-react";
+import { Bot, Download, LogIn, Power, PowerOff, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { AutopilotInfo, AutopilotState } from "@/lib/types";
@@ -22,6 +22,7 @@ const LABELS: Record<AutopilotState, string> = {
   listening: "Autopilot on",
   working: "Autopilot working…",
   "signed-out": "Autopilot · signed out",
+  "needs-update": "Autopilot · update Claude Code",
   error: "Autopilot · error",
 };
 
@@ -32,13 +33,14 @@ const DOTS: Record<AutopilotState, string> = {
   listening: "bg-success",
   working: "animate-pulse bg-accent",
   "signed-out": "bg-danger",
+  "needs-update": "bg-danger",
   error: "bg-danger",
 };
 
 const LOG_LINES = 30;
 const LOG_EVERY_MS = 2_500;
 
-type Action = "start" | "stop" | "sign-in";
+type Action = "start" | "stop" | "sign-in" | "update";
 
 async function send(action: Action): Promise<AutopilotInfo & { opened?: boolean }> {
   const response = await fetch("/api/bridge/autopilot", {
@@ -107,6 +109,12 @@ export function AutopilotChip() {
         useEditorStore.getState().setNotice({ kind: "info", message: result.message ?? "Sign in, then start the autopilot again." });
         return;
       }
+      if (action === "update") {
+        const updated = result as unknown as { ok: boolean; message: string };
+        useEditorStore.getState().setNotice({ kind: updated.ok ? "info" : "error", message: `Claude Code: ${updated.message}` });
+        if (updated.ok) showNow(await send("start"));
+        return;
+      }
       showNow(result);
       if (result.message && !result.running) useEditorStore.getState().setNotice({ kind: "warning", message: result.message });
     } catch (error) {
@@ -129,7 +137,7 @@ export function AutopilotChip() {
         className={cx(
           "ms-focus flex h-6 items-center gap-1.5 rounded border px-2 text-[11.5px] transition-colors",
           running ? "border-border bg-panel-2 text-foreground hover:bg-panel-3" : "border-border text-muted hover:bg-panel-3 hover:text-foreground",
-          (state === "signed-out" || state === "error") && "border-danger/40 text-danger",
+          (state === "signed-out" || state === "needs-update" || state === "error") && "border-danger/40 text-danger",
         )}
       >
         <Bot size={13} />
@@ -183,6 +191,11 @@ export function AutopilotChip() {
             {state === "signed-out" && (
               <Button size="sm" icon={<LogIn size={13} />} loading={busy === "sign-in"} onClick={() => void run("sign-in")} title="Opens a window that signs Claude Code in">
                 Sign in to Claude
+              </Button>
+            )}
+            {state === "needs-update" && (
+              <Button size="sm" icon={<Download size={13} />} loading={busy === "update"} onClick={() => void run("update")} title="Runs claude update, then starts the autopilot">
+                Update Claude Code
               </Button>
             )}
           </div>

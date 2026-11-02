@@ -7,7 +7,8 @@
 import { create } from "zustand";
 import { mediaKindForName, type MediaKind } from "@/lib/media";
 import { analyseReference, fetchMedia, importLink, startTranscript, uploadMedia, waitForReady, type UploadedMedia } from "@/lib/mediaClient";
-import type { Board, MaterialRole, VideoKind } from "@/lib/types";
+import { STYLE_LIBRARY } from "@/lib/ai/styleLibrary";
+import type { Board, BridgeRequestView, IntakeMessage, IntakeOrder, MaterialRole, VideoKind } from "@/lib/types";
 
 export type VideoFormat = "9:16" | "16:9" | "1:1" | "4:5";
 
@@ -80,6 +81,15 @@ interface WizardState {
   styleHints: string[];
   starting: boolean;
   error: string | null;
+  /** "Talk it through with Claude": the conversation, Claude's turn in flight, and the order once done */
+  chat: IntakeMessage[];
+  chatPending: boolean;
+  chatError: string | null;
+  order: IntakeOrder | null;
+  /** send the designer's message; resolves when Claude's reply arrived (or failed) */
+  sendChat(text: string): Promise<void>;
+  /** fill the wizard from the finished order and go on to the content */
+  applyOrder(): void;
   show(): void;
   hide(): void;
   reset(): void;
@@ -108,7 +118,25 @@ const INITIAL = {
   styleHints: [] as string[],
   starting: false,
   error: null as string | null,
+  chat: [] as IntakeMessage[],
+  chatPending: false,
+  chatError: null as string | null,
+  order: null as IntakeOrder | null,
 };
+
+/** Claude's first line, written here so the conversation starts at once. */
+export function chatGreeting(language: string): IntakeMessage {
+  return {
+    role: "claude",
+    text:
+      language === "Persian"
+        ? "سلام! ویدیو برای کیه و کجا منتشر می‌شه؟ مهم‌ترین چیزی که بیننده باید یادش بمونه چیه؟ هر چی می‌دونی بنویس، بقیه‌اش رو با هم مشخص می‌کنیم."
+        : "Hi! Who is the video for, and where will it be posted? What is the one thing viewers should remember? Tell me what you know and we'll work out the rest together.",
+  };
+}
+
+const CHAT_POLL_MS = 1_200;
+const CHAT_TIMEOUT_MS = 10 * 60_000;
 
 let nextKey = 1;
 
@@ -192,7 +220,7 @@ export const useWizardStore = create<WizardState>()((set, get) => {
 
     show: () => set({ open: true }),
     hide: () => set({ open: false }),
-    reset: () => set({ ...INITIAL, files: [], styleHints: [] }),
+    reset: () => set({ ...INITIAL, files: [], styleHints: [], chat: [] }),
     setStep: (step) => set({ step, error: null }),
     set: (patch) => set(patch),
 
@@ -240,6 +268,56 @@ export const useWizardStore = create<WizardState>()((set, get) => {
     updateFile: (key, patch) => set({ files: get().files.map((f) => (f.key === key ? { ...f, ...patch } : f)) }),
 
     removeFile: (key) => set({ files: get().files.filter((f) => f.key !== key) }),
+
+    async sendChat(text) {
+      const state = get();
+      if (state.chatPending || !text.trim()) return;
+      const history = state.chat.length ? state.chat : [chatGreeting(state.language)];
+      const messages: IntakeMessage[] = [...history, { role: "designer", text: text.trim() }];
+      set({ chat: messages, chatPending: true, chatError: null });
+      try {
+        const response = await fetch("/api/bridge/intake", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ messages }),
+        });
+        const started = (await response.json().catch(() => null)) as { id?: string; error?: string } | null;
+        if (!response.ok || !started?.id) throw new Error(started?.error ?? `HTTP ${response.status}`);
+        const until = Date.now() + CHAT_TIMEOUT_MS;
+        for (;;) {
+          await new Promise((resolve) => setTimeout(resolve, CHAT_POLL_MS));
+          const view = (await (await fetch(`/api/bridge/requests/${started.id}`, { cache: "no-store" })).json()) as BridgeRequestView;
+          if (view.state === "done" && view.intakeResult) {
+            const reply = view.intakeResult;
+            set({ chat: [...get().chat, { role: "claude", text: reply.reply }], order: reply.done && reply.order ? reply.order : get().order });
+            return;
+          }
+          if (view.state === "error" || view.state === "cancelled") throw new Error(view.error ?? "Claude did not answer");
+          if (Date.now() > until) throw new Error("Claude took too long to answer");
+        }
+      } catch (error) {
+        set({ chatError: error instanceof Error ? error.message : String(error) });
+      } finally {
+        set({ chatPending: false });
+      }
+    },
+
+    applyOrder() {
+      const order = get().order;
+      if (!order) return;
+      const known = new Set(STYLE_LIBRARY.map((style) => style.name));
+      set({
+        kind: order.kind,
+        brief: order.brief,
+        format: order.format,
+        duration: order.duration,
+        durationSet: true,
+        language: order.language,
+        script: order.script ?? get().script,
+        styleHints: (order.styleHints ?? []).filter((name) => known.has(name)).slice(0, MAX_STYLE_HINTS),
+        step: 1,
+      });
+    },
 
     toggleStyle(name) {
       const hints = get().styleHints;

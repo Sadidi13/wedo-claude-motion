@@ -6,12 +6,23 @@
  * `?client=mcp|headless` words the brief's "how to answer" for the connector's
  * tools or the autopilot's JSON reply instead of the CLI, and is shown in the editor.
  *
- * `kind` is "edit" for Ask Claude requests and "board" for storyboard steps
- * (docs/STORYBOARD.md); a board request also carries the board itself.
+ * `kind` is "edit" for Ask Claude requests, "board" for storyboard steps
+ * (docs/STORYBOARD.md; a board request also carries the board itself) and
+ * "intake" for a turn of the New video wizard's conversation (headless only).
  */
 import { parseScene } from "@/lib/parser";
 import type { BridgeClient } from "@/lib/types";
-import { buildBoardBrief, buildBrief, claimNextRequest, deliverableFor, finishRequest, loadMaterialInfo, readBoard, requireToken } from "@/lib/server/bridge";
+import {
+  buildBoardBrief,
+  buildBrief,
+  buildIntakeBrief,
+  claimNextRequest,
+  deliverableFor,
+  finishRequest,
+  loadMaterialInfo,
+  readBoard,
+  requireToken,
+} from "@/lib/server/bridge";
 
 function layerName(source: string | undefined, id: string): string | null {
   if (source === undefined) return null;
@@ -30,6 +41,11 @@ export async function POST(request: Request): Promise<Response> {
   const record = await claimNextRequest(new Date(), client);
   if (!record) return new Response(null, { status: 204 });
   const req = record.request;
+
+  if (record.intake) {
+    // A turn of the New video wizard's conversation (only the autopilot claims these).
+    return Response.json({ id: record.id, kind: "intake", createdAt: record.createdAt, brief: buildIntakeBrief(record), files: [] });
+  }
 
   if (record.board) {
     const board = await readBoard(record.board.boardId);

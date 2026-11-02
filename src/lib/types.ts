@@ -277,7 +277,7 @@ export type BridgeListenerState = "listening" | "busy" | "offline";
 export type BridgeClient = "cli" | "mcp" | "headless";
 
 /** What the autopilot is doing (src/lib/server/bridge/autopilot.ts). */
-export type AutopilotState = "stopped" | "starting" | "waiting-for-server" | "listening" | "working" | "signed-out" | "error";
+export type AutopilotState = "stopped" | "starting" | "waiting-for-server" | "listening" | "working" | "signed-out" | "needs-update" | "error";
 
 export interface AutopilotInfo {
   /** its process runs */
@@ -476,8 +476,35 @@ export interface BridgeRequestView {
   finishedAt?: string;
   /** set when state === "done": the validated edit, ready for the editor to apply */
   result?: AiEditResponse;
+  /** set when state === "done" for a turn of the wizard's conversation */
+  intakeResult?: IntakeReply;
   /** set when state === "error" */
   error?: string;
+}
+
+/** One turn of the New video wizard's conversation with Claude (docs/STORYBOARD.md). */
+export interface IntakeMessage {
+  role: "designer" | "claude";
+  text: string;
+}
+
+/** What the conversation set up, filled into the wizard when the designer accepts it. */
+export interface IntakeOrder {
+  kind: "motion" | "footage";
+  brief: string;
+  format: "9:16" | "16:9" | "1:1" | "4:5";
+  duration: number;
+  language: string;
+  script?: string;
+  /** style-library names */
+  styleHints?: string[];
+}
+
+/** Claude's turn: a question or, when `done`, the summary and the order. */
+export interface IntakeReply {
+  reply: string;
+  done: boolean;
+  order?: IntakeOrder;
 }
 
 /** Changes Claude pushed from the desktop chat, delivered to the open editor in order. */

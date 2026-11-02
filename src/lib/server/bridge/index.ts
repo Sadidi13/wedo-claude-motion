@@ -45,6 +45,7 @@ export {
 } from "./boards";
 export { buildBoardBrief, deliverableFor, loadMaterialInfo, type BoardDeliverable, type MaterialInfo } from "./boardBrief";
 export { readReferenceFile, referenceFile, referenceImageList, referencesDir } from "./references";
+export { IntakeReplySchema, IntakeStartSchema, answerIntakeTurn, buildIntakeBrief, startIntakeTurn } from "./intake";
 export {
   BridgePushSchema,
   BridgeResultSchema,

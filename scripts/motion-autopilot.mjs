@@ -9,6 +9,9 @@
  * every other answer; an invalid one gets one retry with the error, then the
  * request is declined with the reason.
  *
+ * The New video wizard's conversation is answered here too (only the autopilot takes its turns):
+ * one quick run per designer message, a JSON reply with the next question or the finished order.
+ *
  * Storyboard steps (docs/STORYBOARD.md) are handled the same way: a new video
  * from the editor gets style frames, the designer's choice gets a storyboard,
  * the approval gets the built video, each as one Claude Code run. A built
@@ -39,6 +42,7 @@ import {
   BridgeError,
   BridgeValidationError,
   answer,
+  answerIntake,
   boardReferenceFiles,
   checkQuality,
   claim,
@@ -66,9 +70,16 @@ const MANAGED = process.env.MOTION_STUDIO_AUTOPILOT_MANAGED === "1";
 const SERVER_GONE_MS = 10 * 60_000;
 /** Cleared at start when the installed Claude Code does not know `--effort`. */
 let effortSupported = true;
+/** Set when Claude Code says the model needs a newer version: the autopilot stops and the editor offers the update. */
+let outdated = null;
 /** Private, empty working folder (created at start): no project files, CLAUDE.md or settings around Claude Code. */
 let WORK_DIR = "";
 let CONTRACT_FILE = "";
+/** The wizard's conversation needs no authoring contract: a short system prompt keeps each turn quick. */
+let INTAKE_FILE = "";
+const INTAKE_SYSTEM =
+  "You help a designer set up a new video in WeDo Claude Motion, a motion-design editor, before any design work. " +
+  "You ask short, friendly questions in the designer's language and reply with exactly the JSON object the message asks for, nothing else.";
 
 function parseFlags(argv) {
   const flags = {};
@@ -246,7 +257,7 @@ function readResult(stdout, streaming) {
  * `images` (base64 JPEGs: a storyboard's reference previews) the prompt goes in as one stream-json
  * user message holding the text and the images. `kind` picks the effort and the time limit.
  */
-function runClaude(bin, prompt, { model, kind = "normal", images = [] }) {
+function runClaude(bin, prompt, { model, kind = "normal", images = [], system = CONTRACT_FILE }) {
   const streaming = images.length > 0;
   const effort = effortFor(kind);
   const timeoutMs = RUN_TIMEOUT_MS[kind] ?? RUN_TIMEOUT_MS.normal;
@@ -257,7 +268,7 @@ function runClaude(bin, prompt, { model, kind = "normal", images = [] }) {
     streaming ? "stream-json" : "json",
     ...(streaming ? ["--input-format", "stream-json", "--verbose"] : []),
     "--system-prompt-file",
-    CONTRACT_FILE,
+    system,
     "--tools",
     "",
     "--strict-mcp-config",
@@ -293,7 +304,12 @@ function runClaude(bin, prompt, { model, kind = "normal", images = [] }) {
         return;
       }
       if (result.is_error || result.subtype !== "success") {
-        reject(new Error(`Claude Code reported an error: ${String(result.result ?? result.subtype ?? "unknown").slice(0, 400)}`));
+        const detail = String(result.result ?? result.subtype ?? "unknown").slice(0, 400);
+        // A model newer than this Claude Code: every run would fail the same way until it is updated.
+        if (/does not support this model|or newer is required/i.test(detail)) {
+          outdated = `This Claude Code is too old for ${model ?? "the model"}. Update it (the Autopilot panel's "Update Claude Code", or claude update), then start the autopilot again.`;
+        }
+        reject(new Error(`Claude Code reported an error: ${detail}`));
         return;
       }
       resolve({ text: String(result.result ?? ""), seconds: Math.round((result.duration_ms ?? 0) / 1000) });
@@ -493,7 +509,54 @@ async function handleBoardStep(bin, request, model) {
   }
 }
 
+/** A turn of the New video wizard's conversation: one quick run, a JSON reply posted back. */
+async function handleIntake(bin, request, model) {
+  say(`Conversation turn ${request.id}`);
+  let prompt = request.brief;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let text;
+    try {
+      const run = await runClaude(bin, prompt, { model, kind: "normal", system: INTAKE_FILE });
+      text = run.text;
+      say(`  Claude answered in ${run.seconds}s`);
+    } catch (error) {
+      say(`  ${error.message}`);
+      await decline(request.id, `Autopilot: ${error.message}`).catch(() => undefined);
+      return;
+    }
+    try {
+      const reply = parseJsonObject(text);
+      if (typeof reply.error === "string" && reply.error.trim()) {
+        await decline(request.id, reply.error.trim());
+        say(`  Declined: ${reply.error.trim()}`);
+        return;
+      }
+      await answerIntake(request.id, reply);
+      say(`  ${reply.done ? "Order ready" : "Asked"}: ${String(reply.reply ?? "").replace(/\s+/g, " ").slice(0, 120)}`);
+      return;
+    } catch (error) {
+      if (error instanceof BridgeValidationError && attempt === 1) {
+        say("  The reply did not fit; asking Claude to fix it");
+        prompt = `${request.brief}\n\n# Your previous reply\n${text}\n\n# Problem\nIt failed validation: ${error.message}\nReturn the corrected JSON object only.`;
+        continue;
+      }
+      if (error instanceof BridgeError && error.status === 409) {
+        say("  The designer moved on");
+        return;
+      }
+      const reason = error instanceof Error ? error.message : String(error);
+      say(`  Giving up: ${reason}`);
+      await decline(request.id, `Autopilot could not answer: ${reason}`).catch(() => undefined);
+      return;
+    }
+  }
+}
+
 async function handle(bin, request, model) {
+  if (request.kind === "intake") {
+    await working("Talking with the designer", () => handleIntake(bin, request, model));
+    return;
+  }
   if (request.kind === "board") {
     await working(`Storyboard step for "${request.board.title}"`, () => handleBoardStep(bin, request, model));
     return;
@@ -581,6 +644,8 @@ async function main() {
 
   WORK_DIR = await mkdtemp(path.join(os.tmpdir(), "wedo-autopilot-"));
   CONTRACT_FILE = path.join(WORK_DIR, "system-prompt.md");
+  INTAKE_FILE = path.join(WORK_DIR, "intake-prompt.md");
+  await writeFile(INTAKE_FILE, INTAKE_SYSTEM, "utf8");
   const cleanup = () => {
     try {
       rmSync(WORK_DIR, { recursive: true, force: true });
@@ -638,6 +703,11 @@ async function main() {
       continue;
     }
     await handle(bin, request, model);
+    if (outdated) {
+      say(outdated);
+      exitState = { state: "needs-update", message: outdated };
+      return;
+    }
     if (flags.once) return;
   }
 }

@@ -46,8 +46,8 @@ when the user explicitly asked for no storyboard.
 The top bar's **New video** button (and `?new=1`, which `motion-bridge launch` opens) starts every
 video in four steps (`src/components/wizard/NewVideoWizard.tsx`, state in `src/store/wizardStore.ts`):
 
-1. **Kind**: motion graphics only, or footage of a person (a conversation with Claude comes next);
-   what the video is about, the format (9:16, 16:9, 1:1, 4:5), its length and language.
+1. **Kind**: motion graphics only, or footage of a person; what the video is about, the format
+   (9:16, 16:9, 1:1, 4:5), its length and language. Or **Talk it through with Claude** (below).
 2. **Content**: footage, a voice-over or music, images and a logo, fonts, each uploaded to the media
    library as it is added ([VIDEO.md](VIDEO.md)), with its use (footage, voice-over, music, logo, …)
    and an optional note; footage and voice-overs are transcribed by Whisper and can be corrected
@@ -55,6 +55,15 @@ video in four steps (`src/components/wizard/NewVideoWizard.tsx`, state in `src/s
 3. **Style**: up to three directions from the style library (search, grouped), references to match
    (also uploaded to the library, so any size), or neither and Claude proposes.
 4. **Start**: a summary, and the autopilot switch when nobody listens.
+
+**Talk it through with Claude** (`src/components/wizard/IntakeChat.tsx`): Claude asks one or two
+short questions at a time in the designer's language (who it is for, the one message, kind, format,
+length, the words on screen, the look) and ends with an order; **Use this and add files** fills the
+wizard from it and goes on to the content. Each designer message is a bridge request carrying the
+whole conversation (`POST /api/bridge/intake`, `src/lib/server/bridge/intake.ts`) that only the
+autopilot claims: it answers in seconds, at the everyday effort and with a short system prompt
+instead of the authoring contract, by posting `{ reply, done, order? }` to `/api/bridge/intake/<id>`.
+The wizard turns the autopilot on when nobody runs it.
 
 The board keeps the setup (`videoKind`, `language`, `script`, `materials`, `styleHints`). The brief of
 every step, the build included, lists the materials with their `media/…` references, lengths, sizes

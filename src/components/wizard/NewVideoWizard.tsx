@@ -57,11 +57,12 @@ import { Field } from "../ui/Field";
 import { IconButton } from "../ui/IconButton";
 import { Modal } from "../ui/Modal";
 import { Segmented } from "../ui/Segmented";
+import { IntakeChat } from "./IntakeChat";
 import { TranscriptPanel } from "./TranscriptPanel";
 
 const STEPS: { title: string }[] = [{ title: "Kind" }, { title: "Content" }, { title: "Style" }, { title: "Start" }];
 
-const KINDS: { value: VideoKind; icon: ReactNode; title: string; text: string; soon?: boolean }[] = [
+const KINDS: { value: VideoKind; icon: ReactNode; title: string; text: string }[] = [
   {
     value: "motion",
     icon: <Sparkles size={18} />,
@@ -79,7 +80,6 @@ const KINDS: { value: VideoKind; icon: ReactNode; title: string; text: string; s
     icon: <MessagesSquare size={18} />,
     title: "Talk it through with Claude",
     text: "Claude asks about the client, the message and the look, then sets everything up for you.",
-    soon: true,
   },
 ];
 
@@ -226,9 +226,7 @@ function FileRow({ file, language }: { file: WizardFile; language: string }) {
 }
 
 function KindStep() {
-  const { kind, format, duration, language, brief, set } = useWizardStore(
-    useShallow((s) => ({ kind: s.kind, format: s.format, duration: s.duration, language: s.language, brief: s.brief, set: s.set })),
-  );
+  const { kind, language, set } = useWizardStore(useShallow((s) => ({ kind: s.kind, language: s.language, set: s.set })));
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-3 gap-2.5">
@@ -236,10 +234,9 @@ function KindStep() {
           <button
             key={option.value}
             type="button"
-            disabled={option.soon}
             onClick={() => set({ kind: option.value })}
             className={cx(
-              "ms-focus flex flex-col items-start gap-1.5 rounded-md border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45",
+              "ms-focus flex flex-col items-start gap-1.5 rounded-md border p-3 text-left transition-colors",
               kind === option.value ? "border-accent bg-accent/10" : "border-border bg-panel hover:bg-panel-3",
             )}
           >
@@ -248,10 +245,35 @@ function KindStep() {
               {option.title}
             </span>
             <span className="text-[11.5px] leading-4 text-muted">{option.text}</span>
-            {option.soon && <span className="text-[10.5px] text-accent-2">Coming next</span>}
           </button>
         ))}
       </div>
+      {kind === "chat" ? (
+        <>
+          <Field label="Language">
+            <select className="ms-input h-7 w-44" value={language} onChange={(event) => set({ language: event.target.value })}>
+              {LANGUAGES.map((entry) => (
+                <option key={entry.value} value={entry.value}>
+                  {entry.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <IntakeChat />
+        </>
+      ) : (
+        <KindFields />
+      )}
+    </div>
+  );
+}
+
+function KindFields() {
+  const { kind, format, duration, language, brief, set } = useWizardStore(
+    useShallow((s) => ({ kind: s.kind, format: s.format, duration: s.duration, language: s.language, brief: s.brief, set: s.set })),
+  );
+  return (
+    <>
       <Field label="What is the video about?" hint="The client, what it is for, who watches it, the one thing they should remember.">
         <textarea
           dir="auto"
@@ -290,7 +312,7 @@ function KindStep() {
           </select>
         </Field>
       </div>
-    </div>
+    </>
   );
 }
 

@@ -33,6 +33,8 @@ import type {
   BridgeRequestState,
   BridgeRequestView,
   BridgeStatus,
+  IntakeMessage,
+  IntakeReply,
   Project,
 } from "@/lib/types";
 import { readJsonFile, writeJsonFile } from "../jsonFile";
@@ -75,7 +77,11 @@ export interface BridgeRequestRecord {
   request: AiEditRequest;
   /** set for storyboard steps; they are finished by the board update Claude sends, not by an answer */
   board?: BoardRequestInfo;
+  /** set for a turn of the New video wizard's conversation (only the autopilot claims these) */
+  intake?: { messages: IntakeMessage[] };
   result?: AiEditResponse;
+  /** Claude's turn of the conversation, once answered */
+  intakeResult?: IntakeReply;
   error?: string;
 }
 
@@ -218,7 +224,12 @@ async function pruneRequests(now: number): Promise<number> {
   return pending;
 }
 
-export function createRequest(request: AiEditRequest, now = new Date(), board?: BoardRequestInfo): Promise<BridgeRequestRecord> {
+export function createRequest(
+  request: AiEditRequest,
+  now = new Date(),
+  board?: BoardRequestInfo,
+  intake?: BridgeRequestRecord["intake"],
+): Promise<BridgeRequestRecord> {
   return serial(async () => {
     const pending = await pruneRequests(now.getTime());
     if (pending >= MAX_PENDING_REQUESTS) {
@@ -230,6 +241,7 @@ export function createRequest(request: AiEditRequest, now = new Date(), board?: 
       createdAt: now.toISOString(),
       request,
       ...(board ? { board } : {}),
+      ...(intake ? { intake } : {}),
     };
     await writeJsonAtomic(requestFile(record.id), record);
     return record;
@@ -252,6 +264,8 @@ export function claimNextRequest(now = new Date(), client: BridgeClient = "cli")
     for (const id of await listIds(requestsDir())) {
       const record = await readJson<BridgeRequestRecord>(requestFile(id));
       if (record?.state !== "pending") continue;
+      // The wizard's conversation needs a JSON reply in seconds: only the autopilot takes it.
+      if (record.intake && client !== "headless") continue;
       const claimed: BridgeRequestRecord = { ...record, state: "claimed", claimedAt: now.toISOString(), claimedBy: client };
       await writeJsonAtomic(requestFile(id), claimed);
       return claimed;
@@ -280,8 +294,11 @@ export class BridgeStateError extends Error {
   }
 }
 
-/** `handled`: a storyboard step Claude completed with a board update (there is no edit to apply). */
-export type RequestOutcome = { result: AiEditResponse } | { error: string } | { cancelled: true } | { handled: true };
+/**
+ * `handled`: a storyboard step Claude completed with a board update (there is no edit to apply);
+ * `intake`: Claude's turn of the wizard's conversation.
+ */
+export type RequestOutcome = { result: AiEditResponse } | { error: string } | { cancelled: true } | { handled: true } | { intake: IntakeReply };
 
 /**
  * Finish a request. Only pending / claimed requests can be finished; a
@@ -300,6 +317,7 @@ export function finishRequest(id: string, outcome: RequestOutcome, now = new Dat
     if ("result" in outcome) next = { ...record, state: "done", result: outcome.result, finishedAt };
     else if ("error" in outcome) next = { ...record, state: "error", error: outcome.error, finishedAt };
     else if ("handled" in outcome) next = { ...record, state: "done", finishedAt };
+    else if ("intake" in outcome) next = { ...record, state: "done", intakeResult: outcome.intake, finishedAt };
     else next = { ...record, state: "cancelled", finishedAt };
     await writeJsonAtomic(requestFile(id), next);
     return next;

@@ -67,7 +67,7 @@ export function describeAutopilot(file: AutopilotStateFile | null, alive: boolea
   if (!file) return { running: false, state: "stopped", message: null, model: null, effort: null, startedAt: null };
   const model = file.model ?? null;
   const effort = file.effort ?? null;
-  const ended = file.state === "stopped" || file.state === "signed-out" || file.state === "error";
+  const ended = file.state === "stopped" || file.state === "signed-out" || file.state === "needs-update" || file.state === "error";
   if (!alive || ended) {
     // A process that died without saying so (killed, crashed) counts as stopped.
     const state: AutopilotState = ended ? file.state : "stopped";
@@ -204,6 +204,32 @@ export function claudeCommand(): string {
   if (onPath) return onPath.trim();
   const native = path.join(os.homedir(), ".local", "bin", process.platform === "win32" ? "claude.exe" : "claude");
   return existsSync(native) ? native : "claude";
+}
+
+/**
+ * Update Claude Code (`claude update`), for when the autopilot's model needs a newer version. Runs
+ * without a window; resolves with what it printed (the last lines). Start the autopilot again after.
+ */
+export function updateClaudeCode(): Promise<{ ok: boolean; message: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(claudeCommand(), ["update"], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    const keep = (chunk: Buffer) => {
+      output = (output + chunk.toString("utf8")).slice(-4_000);
+    };
+    child.stdout.on("data", keep);
+    child.stderr.on("data", keep);
+    const timer = setTimeout(() => child.kill(), 10 * 60_000);
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolve({ ok: false, message: `Could not run Claude Code: ${error.message}` });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      const lines = output.trim().split(/\r?\n/).filter(Boolean).slice(-3).join(" ");
+      resolve({ ok: code === 0, message: lines || (code === 0 ? "Claude Code is up to date." : `claude update exited with code ${code}`) });
+    });
+  });
 }
 
 /**

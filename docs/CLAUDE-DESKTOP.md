@@ -107,6 +107,11 @@ efforts and the log, and opens Claude Code's sign-in when it is signed out.
 - **Stop** ends the Claude Code run in progress too, and declines what the autopilot had claimed so
   the editor shows the reason instead of waiting.
 - One the server started stops by itself when the server has been gone for 10 minutes.
+- When Claude Code is too old for the model ("does not support this model"), the autopilot stops in
+  the `needs-update` state and the panel offers **Update Claude Code** (`{ "action": "update" }`
+  runs `claude update` without a window), then starts it again.
+- The New video wizard's conversation turns (`kind: "intake"` in the claim response) are claimed by
+  the autopilot only; `wait` and the chat connector never receive them.
 
 ### Without the editor's switch
 
