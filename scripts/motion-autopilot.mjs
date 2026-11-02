@@ -59,7 +59,8 @@ import {
 const DEFAULT_MODEL = "claude-opus-5-5";
 const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
 /** How long one run may take: deep work (a whole video at a high effort) gets longer. */
-const RUN_TIMEOUT_MS = { deep: 30 * 60_000, normal: 10 * 60_000 };
+// A storyboard for an 81-second footage reel took 29m58s at xhigh: builds of long videos need more.
+const RUN_TIMEOUT_MS = { deep: 60 * 60_000, normal: 10 * 60_000 };
 const POLL_MS = 1_000;
 /** While Claude works, the state file is refreshed this often so the editor shows "working", not "offline". */
 const HEARTBEAT_MS = 5_000;
