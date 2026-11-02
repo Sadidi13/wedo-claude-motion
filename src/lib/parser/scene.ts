@@ -27,7 +27,8 @@ const PREVIEW_MAX = 60;
 /** Runtime defaults of <Stage> (see CONTRACTS §1 runtime table). */
 const STAGE_DEFAULTS: StageMeta = { width: 1280, height: 720, duration: 10, fps: 30 };
 
-const IMAGE_TAGS = new Set(["img", "Image", "video"]);
+/** Pictures and footage, including the runtime's <Video> (library videos, docs/VIDEO.md). */
+const IMAGE_TAGS = new Set(["img", "Image", "video", "Video"]);
 const SHAPE_TAGS = new Set([
   "svg", "path", "circle", "ellipse", "rect", "line", "polyline", "polygon", "g", "defs", "use",
   "mask", "clipPath", "linearGradient", "radialGradient", "stop", "pattern", "symbol", "text",

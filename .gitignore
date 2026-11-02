@@ -43,3 +43,6 @@ next-env.d.ts
 
 # Claude Desktop bridge scratch files (briefs, drafts, fetched project)
 /.motion-bridge/
+
+# Media library: imported footage, its preview copies and export frames (docs/VIDEO.md)
+/.motion-media/

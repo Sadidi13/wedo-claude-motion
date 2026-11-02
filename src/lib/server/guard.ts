@@ -13,7 +13,8 @@
  *    Local tools (CLI, MCP connector, autopilot, curl) send neither and pass; the routes that act
  *    for Claude also require the bridge token.
  * 3. Writes to /api must be JSON (forces a CORS preflight for any cross-origin attempt) and at most
- *    MAX_API_BODY_BYTES by Content-Length.
+ *    MAX_API_BODY_BYTES by Content-Length. The one exception is the video upload, which streams a
+ *    raw body and is checked by `checkMediaUpload` (see there).
  */
 
 export const MAX_API_BODY_BYTES = 64 * 1024 * 1024;
@@ -63,12 +64,8 @@ function sameOrigin(origin: string, host: string): boolean {
   }
 }
 
-export function checkRequest(input: GuardInput): GuardResult {
-  if (!isAllowedHost(input.host, input.allowedHosts)) {
-    return { ok: false, status: 403, error: "This server only answers on localhost" };
-  }
-  if (!input.pathname.startsWith("/api/")) return { ok: true };
-
+/** Rules 1 and 2: a local host, and no cross-site or cross-origin caller. */
+function checkCaller(input: GuardInput): GuardResult {
   const site = input.secFetchSite?.toLowerCase();
   if (site && site !== "same-origin" && site !== "none") {
     return { ok: false, status: 403, error: "Cross-site requests are not allowed" };
@@ -79,6 +76,44 @@ export function checkRequest(input: GuardInput): GuardResult {
   if (input.origin === "null") {
     return { ok: false, status: 403, error: "Requests from opaque origins are not allowed" };
   }
+  return { ok: true };
+}
+
+/**
+ * The one route that takes a raw body: POST /api/media/upload streams a video file to disk. It is
+ * left out of src/proxy.ts (whose body buffering would cut large uploads at 10 MB) and calls this
+ * itself: the same host and same-origin rules, plus a POST of `application/octet-stream` (not a
+ * CORS-simple type, so a cross-site page cannot send it without a preflight) of at most
+ * MAX_MEDIA_UPLOAD_BYTES.
+ */
+export const MAX_MEDIA_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024;
+
+export function checkMediaUpload(input: GuardInput): GuardResult {
+  if (!isAllowedHost(input.host, input.allowedHosts)) {
+    return { ok: false, status: 403, error: "This server only answers on localhost" };
+  }
+  const caller = checkCaller(input);
+  if (!caller.ok) return caller;
+  if (input.method.toUpperCase() !== "POST") return { ok: false, status: 405, error: "Use POST to upload a video" };
+  const type = (input.contentType ?? "").split(";")[0].trim().toLowerCase();
+  if (type !== "application/octet-stream") {
+    return { ok: false, status: 415, error: "Send the video as application/octet-stream" };
+  }
+  const length = Number(input.contentLength ?? "0");
+  if (Number.isFinite(length) && length > MAX_MEDIA_UPLOAD_BYTES) {
+    return { ok: false, status: 413, error: `Video larger than ${MAX_MEDIA_UPLOAD_BYTES / 1024 ** 3} GB` };
+  }
+  return { ok: true };
+}
+
+export function checkRequest(input: GuardInput): GuardResult {
+  if (!isAllowedHost(input.host, input.allowedHosts)) {
+    return { ok: false, status: 403, error: "This server only answers on localhost" };
+  }
+  if (!input.pathname.startsWith("/api/")) return { ok: true };
+
+  const caller = checkCaller(input);
+  if (!caller.ok) return caller;
 
   const method = input.method.toUpperCase();
   if (WRITE_METHODS.has(method)) {

@@ -34,6 +34,7 @@ import {
   Trash2,
   Type,
   Upload,
+  Video as VideoIcon,
   Volume2,
   type LucideIcon,
 } from "lucide-react";
@@ -247,6 +248,7 @@ export function LayersPanel() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const modelInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const closeShapeMenu = useCallback(() => setShapeMenu(null), []);
@@ -282,6 +284,13 @@ export function LayersPanel() {
           }}
         >
           <Shapes size={14} />
+        </IconButton>
+        <IconButton
+          title="Add a video (footage) at the playhead, under the other layers: any size, exported frame by frame with its sound"
+          disabled={disabled}
+          onClick={() => videoInputRef.current?.click()}
+        >
+          <VideoIcon size={14} />
         </IconButton>
         <IconButton
           title="Add a 3D model (.glb) at the playhead: lit, framed and turning"
@@ -325,6 +334,18 @@ export function LayersPanel() {
             const file = event.target.files?.[0];
             event.target.value = "";
             if (file) void store.addImageLayer(file);
+          }}
+        />
+        <input
+          ref={videoInputRef}
+          type="file"
+          accept="video/*,.mp4,.mov,.m4v,.webm,.mkv,.avi"
+          className="hidden"
+          aria-label="Video file"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void store.addVideoLayer(file);
           }}
         />
         <input

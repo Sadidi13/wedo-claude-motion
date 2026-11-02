@@ -16,8 +16,10 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { sfxDuration } from "@/lib/audio/sfx";
 import { dataUrlToBytes } from "@/lib/importer/dataUrl";
+import { mediaIdOf } from "@/lib/media";
 import type { AudioClip } from "@/runtime/audio";
 import { ensureSfx } from "../audio";
+import { mediaPaths, readMeta } from "../media/store";
 import { runFfmpeg } from "./ffmpeg";
 
 export type { AudioClip };
@@ -73,8 +75,16 @@ export function mergeClips(lists: unknown[]): AudioClip[] {
   return [...byKey.values()];
 }
 
-/** Write each clip's source next to the job; returns the usable clips and why others were skipped. */
-export async function prepareAudio(jobDir: string, clips: AudioClip[]): Promise<{ inputs: PreparedClip[]; skipped: string[] }> {
+/**
+ * Write each clip's source next to the job; returns the usable clips and why others were skipped.
+ * A <Video>'s sound (src `media/<id>`) is read from the library's original file, for the ids the
+ * project refers to (`mediaIds`).
+ */
+export async function prepareAudio(
+  jobDir: string,
+  clips: AudioClip[],
+  mediaIds: readonly string[] = [],
+): Promise<{ inputs: PreparedClip[]; skipped: string[] }> {
   const dir = path.join(jobDir, "audio");
   await mkdir(dir, { recursive: true });
   const inputs: PreparedClip[] = [];
@@ -83,6 +93,14 @@ export async function prepareAudio(jobDir: string, clips: AudioClip[]): Promise<
     try {
       if (clip.sfx) {
         inputs.push({ clip, file: await ensureSfx(clip.sfx), length: sfxDuration(clip.sfx) });
+        continue;
+      }
+      const mediaId = mediaIdOf(clip.src);
+      if (mediaId) {
+        const meta = mediaIds.includes(mediaId) ? await readMeta(mediaId) : null;
+        if (!meta) skipped.push(`${clip.key}: media/${mediaId} is not a video this project uses`);
+        else if (!meta.hasAudio) skipped.push(`${clip.key}: "${meta.name}" has no sound`);
+        else inputs.push({ clip, file: mediaPaths.source(mediaId, meta.ext), length: meta.duration || undefined });
         continue;
       }
       if (clip.src?.startsWith("data:")) {
@@ -162,9 +180,10 @@ export async function mixAudio(
   clips: AudioClip[],
   range: { start: number; end: number },
   stageEnd: number,
+  mediaIds: readonly string[] = [],
 ): Promise<{ file: string | null; skipped: string[] }> {
   if (clips.length === 0) return { file: null, skipped: [] };
-  const { inputs, skipped } = await prepareAudio(jobDir, clips);
+  const { inputs, skipped } = await prepareAudio(jobDir, clips, mediaIds);
   const output = path.join(jobDir, "audio.wav");
   const args = buildAudioMixArgs(inputs, range, stageEnd, output);
   if (!args) return { file: null, skipped };

@@ -10,6 +10,7 @@ import {
   modelLayerTemplate,
   shapeLayerTemplate,
   textLayerTemplate,
+  videoLayerTemplate,
 } from "../templates";
 import { findDisallowedImports, findForbiddenCalls } from "@/lib/ai/validate";
 import { SCENE } from "./fixture";
@@ -49,6 +50,17 @@ describe("templates parse and insert as Sprites", () => {
     const node = parseScene(source).byId[id];
     expect(node.children[0].kind).toBe("image");
     expect(source).toContain('src="assets/logo.png"');
+  });
+
+  it("video template is a Sprite holding one library <Video>, and goes under the other layers at index 0", () => {
+    const jsx = videoLayerTemplate({ start: 0, end: 46.35 }, "media/k3f9x2abcd12.mp4", 'Talk "take 2"');
+    const { source, id } = insertLayer(SCENE, null, jsx, 0);
+    const scene = parseScene(source);
+    expect(scene.layers[0].id).toBe(id);
+    expect(scene.byId[id]).toMatchObject({ kind: "sprite", name: 'Talk "take 2"', start: 0, end: 46.35 });
+    expect(scene.byId[id].children.map((c) => c.kind)).toEqual(["image"]);
+    expect(jsx).toContain('<Video src="media/k3f9x2abcd12.mp4" />');
+    expect(findForbiddenCalls(jsx)).toEqual([]);
   });
 
   it("model template is one Three3D canvas layer that loads the asset with reflections, contract-clean", () => {

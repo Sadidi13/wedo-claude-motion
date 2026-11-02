@@ -9,7 +9,9 @@
  * so WebGL canvases — drawn synchronously inside `__seek` with
  * preserveDrawingBuffer — are on screen. Projects that draw with WebGL get the
  * extra Chromium switches of `webglLaunchArgs`. Frames are split into
- * contiguous ranges, one BrowserContext + page per worker. status.json is
+ * contiguous ranges, one BrowserContext + page per worker. Library videos the
+ * project refers to (`media/<id>`) are made ready first and are the only /api
+ * files the pages may load besides the project. status.json is
  * updated every 10 frames and on completion; the browser is always closed in
  * `finally`. Each worker also reports the <Audio> clips its frames rendered
  * (`window.__getAudioClips`), merged into `RenderResult.audio` for the mix.
@@ -22,7 +24,9 @@ import { mkdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { chromium, type Browser } from "playwright-core";
+import { mediaIdsIn } from "@/lib/media";
 import type { Project } from "@/lib/types";
+import { ensureMediaReady } from "../media/ingest";
 import { type AudioClip, mergeClips } from "./audio";
 import { jobDir, readOptions, readProject, writeStatus } from "./jobs";
 import { frameFileName, frameTime, partitionFrames, resolvePlan, type FrameRange, type RenderPlan } from "./plan";
@@ -120,13 +124,26 @@ export function chromiumSandboxEnabled(
   return !(env.MOTION_STUDIO_CHROMIUM_NO_SANDBOX === "1" || (platform === "linux" && uid === 0));
 }
 
+const MEDIA_REQUEST = /^\/api\/media\/([a-z0-9]{12})(?:\/frames\/\d{1,7})?$/;
+
+/** The media library ids a project's code refers to (`media/<id>`), for the render allowlist. */
+export function projectMediaIds(project: Pick<Project, "files">): string[] {
+  return mediaIdsIn(
+    Object.values(project.files)
+      .filter((file) => SCRIPT_KINDS.has(file.kind) || file.kind === "css" || file.kind === "json")
+      .map((file) => file.content)
+      .join("\n"),
+  );
+}
+
 /**
  * Network policy while rendering untrusted scene code: on the app's own origin only the page
- * itself, the app's bundles (/_next/*) and this job's project may load, so the scene cannot call
- * /api (start more exports, queue work for Claude, read projects). Other origins (web fonts,
+ * itself, the app's bundles (/_next/*), this job's project and the metadata and frames of the
+ * library videos the project refers to (`mediaIds`) may load, so the scene cannot call the rest
+ * of /api (start more exports, queue work for Claude, read projects). Other origins (web fonts,
  * images) stay allowed so exports look like the editor.
  */
-export function isAllowedRenderRequest(requestUrl: string, pageUrl: string, jobId: string): boolean {
+export function isAllowedRenderRequest(requestUrl: string, pageUrl: string, jobId: string, mediaIds: readonly string[] = []): boolean {
   let request: URL;
   let page: URL;
   try {
@@ -137,10 +154,12 @@ export function isAllowedRenderRequest(requestUrl: string, pageUrl: string, jobI
   }
   if (request.protocol === "data:" || request.protocol === "blob:") return true;
   if (request.origin !== page.origin) return true;
+  const media = MEDIA_REQUEST.exec(request.pathname);
   return (
     request.pathname === page.pathname ||
     request.pathname.startsWith("/_next/") ||
-    request.pathname === `/api/export/${jobId}/project`
+    request.pathname === `/api/export/${jobId}/project` ||
+    (media !== null && mediaIds.includes(media[1]))
   );
 }
 
@@ -218,13 +237,14 @@ async function renderRange(
   framesDir: string,
   range: FrameRange,
   onFrame: () => Promise<void>,
+  mediaIds: readonly string[],
 ): Promise<unknown> {
   const context = await browser.newContext({
     viewport: { width: plan.width, height: plan.height },
     deviceScaleFactor: plan.scale,
   });
   await context.route("**/*", (route) =>
-    isAllowedRenderRequest(route.request().url(), url, jobId) ? route.continue() : route.abort("blockedbyclient"),
+    isAllowedRenderRequest(route.request().url(), url, jobId, mediaIds) ? route.continue() : route.abort("blockedbyclient"),
   );
   try {
     const page = await context.newPage();
@@ -285,6 +305,22 @@ async function renderRange(
 }
 
 /**
+ * Ask the server for one video's metadata and first frame before any page does. Under `next dev`
+ * the first request to a route compiles it, which can take longer than SEEK_TIMEOUT_MS when every
+ * render page asks at once; afterwards each frame is a plain file read. Failures are left to the
+ * pages to report.
+ */
+async function warmMediaRoutes(origin: string, mediaIds: readonly string[]): Promise<void> {
+  for (const id of mediaIds) {
+    for (const route of [`/api/media/${id}`, `/api/media/${id}/frames/0`]) {
+      await fetch(new URL(route, origin), { signal: AbortSignal.timeout(READY_TIMEOUT_MS) })
+        .then((response) => response.arrayBuffer())
+        .catch(() => undefined);
+    }
+  }
+}
+
+/**
  * Renders every frame of the job's export range. Resolves with the plan and
  * the frames directory; rejects (after closing the browser) on any failure.
  * The caller owns status.json's `state` before/after; this only writes progress.
@@ -300,6 +336,10 @@ export async function renderJob(jobId: string, origin: string, opts: RenderOptio
   const url = opts.pageUrl ?? previewUrl(origin, jobId, plan.transparent);
   const ranges = partitionFrames(plan.frameCount, opts.workers ?? defaultWorkers());
   await writeStatus(jobId, { state: "rendering", framesDone: 0, framesTotal: plan.frameCount, progress: 0 });
+  // Library videos the scene uses must have their frames before the first one is drawn.
+  const mediaIds = projectMediaIds(project);
+  await ensureMediaReady(mediaIds);
+  if (!opts.pageUrl) await warmMediaRoutes(origin, mediaIds);
   const onFrame = createProgress(jobId, plan.frameCount);
 
   const browser = await chromium.launch({
@@ -309,7 +349,7 @@ export async function renderJob(jobId: string, origin: string, opts: RenderOptio
   });
   let reported: unknown[];
   try {
-    reported = await Promise.all(ranges.map((range) => renderRange(browser, jobId, url, plan, framesDir, range, onFrame)));
+    reported = await Promise.all(ranges.map((range) => renderRange(browser, jobId, url, plan, framesDir, range, onFrame, mediaIds)));
   } finally {
     await browser.close();
   }

@@ -9,6 +9,7 @@ import {
   chromiumSandboxEnabled,
   isAllowedRenderRequest,
   previewUrl,
+  projectMediaIds,
   projectUsesWebGL,
   resolveChromiumPath,
   webglLaunchArgs,
@@ -87,6 +88,30 @@ describe("isAllowedRenderRequest", () => {
     expect(allowed("http://localhost:3000/api/bridge/requests")).toBe(false);
     expect(allowed("http://localhost:3000/api/export/otherjob000000/project")).toBe(false);
     expect(allowed("http://localhost:3000/")).toBe(false);
+  });
+
+  it("lets the scene load the metadata and frames of the library videos the project uses, and nothing else", () => {
+    const withMedia = (url: string) => isAllowedRenderRequest(url, page, "abcdefghijklmn", ["k3f9x2abcd12"]);
+    expect(withMedia("http://localhost:3000/api/media/k3f9x2abcd12")).toBe(true);
+    expect(withMedia("http://localhost:3000/api/media/k3f9x2abcd12/frames/1388")).toBe(true);
+    expect(withMedia("http://localhost:3000/api/media/k3f9x2abcd12/preview")).toBe(false);
+    expect(withMedia("http://localhost:3000/api/media/otherotherxx/frames/0")).toBe(false);
+    expect(withMedia("http://localhost:3000/api/media")).toBe(false);
+    expect(withMedia("http://localhost:3000/api/media/upload")).toBe(false);
+    expect(allowed("http://localhost:3000/api/media/k3f9x2abcd12/frames/0")).toBe(false);
+  });
+});
+
+describe("projectMediaIds", () => {
+  it("collects the library ids the project's code refers to", () => {
+    const project = {
+      files: {
+        "scene.jsx": { path: "scene.jsx", kind: "jsx" as const, content: '<Video src="media/k3f9x2abcd12.mp4" /><Video src="media/k3f9x2abcd12.mp4" from={3} />' },
+        "parts.jsx": { path: "parts.jsx", kind: "jsx" as const, content: 'const B = "media/zz99yy88xx77.mov";' },
+        "assets/a.png": { path: "assets/a.png", kind: "asset" as const, content: "data:image/png;base64,media/aaaaaaaaaaaa" },
+      },
+    };
+    expect(projectMediaIds(project)).toEqual(["k3f9x2abcd12", "zz99yy88xx77"]);
   });
 });
 

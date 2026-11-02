@@ -22,6 +22,8 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except Next's own build assets (those are static and carry no side effects).
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // Everything except Next's own build assets (those are static and carry no side effects) and the
+  // video upload, which streams a raw body this proxy would buffer and cut at 10 MB; that route
+  // runs the same guard itself (checkMediaUpload).
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/media/upload).*)"],
 };

@@ -86,6 +86,11 @@ function subscribePlayback(listener: () => void): () => void {
 
 const readPlayback = () => playback;
 
+/** The editor's transport as the preview knows it (also read by <Video> for its sound). */
+export function useAudioPlayback(): PlaybackState {
+  return useSyncExternalStore(subscribePlayback, readPlayback, readPlayback);
+}
+
 // ---------------------------------------------------------------------------
 // Clips seen by this page (the exporter's list)
 // ---------------------------------------------------------------------------
@@ -107,6 +112,24 @@ function installGlobal(): void {
   if (w && !w.__getAudioClips) w.__getAudioClips = audioClips;
 }
 
+/** Add (or update) a clip for the exporter's mix: the sound of a <Video> (src `media/<id>`). */
+export function recordAudioClip(clip: AudioClip): void {
+  installGlobal();
+  seen.set(clip.key, clip);
+}
+
+/** True in headless export (`window.__RENDER_MODE` or `?__render=1`). */
+export function isRenderMode(): boolean {
+  const w = motionWindow();
+  if (!w) return false;
+  return w.__RENDER_MODE === true || new URLSearchParams(window.location.search).get("__render") === "1";
+}
+
+/** True inside the editor's preview iframe. */
+export function isEmbedded(): boolean {
+  return motionWindow()?.__EMBED === true;
+}
+
 // ---------------------------------------------------------------------------
 // The component
 // ---------------------------------------------------------------------------
@@ -115,16 +138,6 @@ const selectTime = (clock: ClockState) => clock.time;
 const selectClockPlaying = (clock: ClockState) => clock.playing;
 /** Re-seek when the clip drifts further than this from the playhead. */
 const DRIFT_SECONDS = 0.25;
-
-function isRenderMode(): boolean {
-  const w = motionWindow();
-  if (!w) return false;
-  return w.__RENDER_MODE === true || new URLSearchParams(window.location.search).get("__render") === "1";
-}
-
-function isEmbedded(): boolean {
-  return motionWindow()?.__EMBED === true;
-}
 
 /** Where the browser fetches a built-in sound from (the app's own route; rendered once by the server). */
 export function sfxUrl(name: string): string {
@@ -154,7 +167,7 @@ export function Audio({
 }: AudioProps) {
   const time = useClock(selectTime);
   const clockPlaying = useClock(selectClockPlaying);
-  const { playing: editorPlaying, muted } = useSyncExternalStore(subscribePlayback, readPlayback, readPlayback);
+  const { playing: editorPlaying, muted } = useAudioPlayback();
   const elementRef = useRef<HTMLAudioElement | null>(null);
   const knownLength = sfx && isSfxName(sfx) ? sfxDuration(sfx) : undefined;
   const layerId = typeof rest["data-layer-id"] === "string" ? rest["data-layer-id"] : undefined;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type GuardInput, MAX_API_BODY_BYTES, checkRequest, hostnameOf, isAllowedHost } from "../guard";
+import { type GuardInput, MAX_API_BODY_BYTES, MAX_MEDIA_UPLOAD_BYTES, checkMediaUpload, checkRequest, hostnameOf, isAllowedHost } from "../guard";
 
 const base: GuardInput = {
   method: "GET",
@@ -64,5 +64,35 @@ describe("request bodies", () => {
 
   it("caps the size", () => {
     expect(check({ method: "PUT", contentType: "application/json", contentLength: String(MAX_API_BODY_BYTES + 1) })).toMatchObject({ ok: false, status: 413 });
+  });
+});
+
+describe("video upload", () => {
+  const upload = (overrides: Partial<GuardInput>) =>
+    checkMediaUpload({
+      ...base,
+      pathname: "/api/media/upload",
+      method: "POST",
+      contentType: "application/octet-stream",
+      contentLength: String(350 * 1024 * 1024),
+      ...overrides,
+    });
+
+  it("takes a large raw file from the editor or a local tool", () => {
+    expect(upload({ secFetchSite: "same-origin", origin: "http://localhost:3000" })).toEqual({ ok: true });
+    expect(upload({})).toEqual({ ok: true });
+  });
+
+  it("keeps the local-only and same-origin rules", () => {
+    expect(upload({ host: "evil.example:3000" })).toMatchObject({ ok: false, status: 403 });
+    expect(upload({ secFetchSite: "cross-site", origin: "https://evil.example" })).toMatchObject({ ok: false, status: 403 });
+    expect(upload({ origin: "null" })).toMatchObject({ ok: false, status: 403 });
+  });
+
+  it("accepts only a POST of application/octet-stream up to the cap", () => {
+    expect(upload({ contentType: "multipart/form-data; boundary=x" })).toMatchObject({ ok: false, status: 415 });
+    expect(upload({ contentType: "text/plain" })).toMatchObject({ ok: false, status: 415 });
+    expect(upload({ method: "PUT" })).toMatchObject({ ok: false, status: 405 });
+    expect(upload({ contentLength: String(MAX_MEDIA_UPLOAD_BYTES + 1) })).toMatchObject({ ok: false, status: 413 });
   });
 });

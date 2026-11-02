@@ -57,7 +57,9 @@ import {
   modelLayerTemplate,
   shapeLayerTemplate,
   textLayerTemplate,
+  videoLayerTemplate,
 } from "./templates";
+import { uploadVideo, waitForLength } from "@/lib/mediaClient";
 import { clamp, snapToFrame } from "./time";
 
 export const MAX_HISTORY = 200;
@@ -145,6 +147,8 @@ export interface EditorState {
   addShapeLayer(kind: ShapeKind): void;
   /** an audio file as an <Audio> clip at the playhead (its own length) */
   addAudioLayer(file: File): Promise<void>;
+  /** a video file imported into the media library, as the bottom layer at the playhead (docs/VIDEO.md) */
+  addVideoLayer(file: File): Promise<void>;
   /** a built-in sound effect (or a looping bed under the rest of the scene) at the playhead */
   addSfxLayer(name: string): void;
 
@@ -670,6 +674,39 @@ export const useEditorStore = create<EditorState>()((set, get) => {
         const end = snapToFrame(Math.min(scene.meta.duration, start + (length ?? scene.meta.duration)), fps);
         const name = file.name.replace(/\.[^.]+$/, "") || "Audio";
         insertTemplate(audioLayerTemplate({ src: path, start, end, name }), withAsset, "Audio");
+      } catch (error) {
+        set({ notice: { kind: "error", message: errorMessage(error) } });
+      }
+    },
+
+    async addVideoLayer(file) {
+      try {
+        const percent = (fraction: number) => Math.round(fraction * 100);
+        set({ notice: { kind: "info", message: `Uploading “${file.name}”…` } });
+        const uploaded = await uploadVideo(file, (fraction) =>
+          set({ notice: { kind: "info", message: `Uploading “${file.name}”… ${percent(fraction)}%` } }),
+        );
+        set({ notice: { kind: "info", message: `Reading “${file.name}”…` } });
+        const meta = await waitForLength(uploaded.id);
+        const { project, scene, time } = get();
+        if (!project || !scene) return;
+        const fps = scene.meta.fps;
+        const start = snapToFrame(clamp(time, 0, scene.meta.duration), fps);
+        const end = Number(snapToFrame(start + meta.duration, fps).toFixed(3)); // a readable literal in the code
+        const name = file.name.replace(/\.[^.]+$/, "") || "Video";
+        // Footage sits under everything else, and the stage grows to show all of it.
+        let source = ["Sprite", "Video"].reduce(ensureRuntimeImport, entrySource(project));
+        const longer = end > scene.meta.duration;
+        if (longer) source = parserSetStageMeta(source, { duration: end });
+        const inserted = parserInsertLayer(source, null, videoLayerTemplate({ start, end }, uploaded.ref, name), 0);
+        commitSource(inserted.source, { recordHistory: true });
+        set({
+          selectedId: inserted.id,
+          notice: {
+            kind: "info",
+            message: `Added “${name}” (${meta.duration.toFixed(1)} s)${longer ? `; the stage now lasts ${end.toFixed(2)} s` : ""}. Its frames are being prepared; the preview shows it in a moment.`,
+          },
+        });
       } catch (error) {
         set({ notice: { kind: "error", message: errorMessage(error) } });
       }

@@ -8,6 +8,8 @@
  *   start [--no-open] [--wait <s>] start the editor's server if needed and open the editor
  *   open [--wait <s>]              open the editor in the browser (waiting for a starting server)
  *   status                         is the server up, is anyone listening, what is open
+ *   media [<video file>]           import footage into the media library and print its
+ *                                  `media/<id>.<ext>` ref for <Video src> (no file: list the library)
  *   contract                       write the authoring contract to .motion-bridge/contract.md
  *   project                        write the open project to .motion-bridge/project/
  *   wait                           block until the editor queues a request, claim it,
@@ -38,7 +40,8 @@
  *                                  Claude Desktop must be closed: it overwrites the file while running.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
+import { Readable } from "node:stream";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
@@ -636,8 +639,50 @@ async function cmdOpen(flags) {
   console.log(`Opened ${BASE} in your browser.`);
 }
 
+/**
+ * `media <video file>`: import footage into the media library (streamed, any size) and print the
+ * `media/<id>.<ext>` reference scene code uses in <Video src>. Waits until its frames are ready.
+ * `media` alone lists the library.
+ */
+async function cmdMedia(positional) {
+  await ensureServer();
+  const file = positional[0];
+  if (!file) {
+    const list = await (await fetch(`${BASE}/api/media`)).json();
+    if (!list.length) console.log("The media library is empty.");
+    for (const m of list) console.log(`${m.ref}  ${m.state}  ${m.duration.toFixed(2)}s  ${m.width}x${m.height}  ${m.hasAudio ? "sound" : "silent"}  "${m.name}"`);
+    return;
+  }
+  const local = path.resolve(file);
+  const info = await stat(local).catch(() => null);
+  if (!info?.isFile()) throw new CliError(`Cannot read ${file}`);
+  console.log(`Uploading ${path.basename(local)} (${(info.size / 1024 / 1024).toFixed(1)} MB)...`);
+  const response = await fetch(`${BASE}/api/media/upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(path.basename(local)), "Content-Length": String(info.size) },
+    body: Readable.toWeb(createReadStream(local)),
+    duplex: "half",
+  });
+  const uploaded = await response.json().catch(() => ({}));
+  if (response.status !== 201) throw new CliError(`Upload failed: ${uploaded.error ?? `HTTP ${response.status}`}`);
+  process.stdout.write("Preparing the preview copy and the export frames");
+  let meta = uploaded;
+  while (meta.state === "processing") {
+    await sleep(2000);
+    process.stdout.write(".");
+    meta = await (await fetch(`${BASE}/api/media/${uploaded.id}`)).json();
+  }
+  process.stdout.write("\n");
+  if (meta.state !== "ready") throw new CliError(`The video could not be prepared: ${meta.error ?? meta.state}`);
+  console.log(`ref:      ${meta.ref}`);
+  console.log(`length:   ${meta.duration.toFixed(3)} s, ${meta.width}x${meta.height}, ${meta.sourceFps || "?"} fps, ${meta.hasAudio ? "with sound" : "no sound"}`);
+  console.log(`frames:   ${meta.frameCount} at ${meta.frameRate} fps, ${meta.frameWidth}x${meta.frameHeight}`);
+  console.log(`use:      <Sprite start={0} end={${meta.duration.toFixed(2)}}><Video src="${meta.ref}" /></Sprite>`);
+}
+
 const COMMANDS = {
   start: (_positional, flags) => cmdStart(flags),
+  media: (positional) => cmdMedia(positional),
   open: (_positional, flags) => cmdOpen(flags),
   status: () => cmdStatus(),
   contract: () => cmdContract(),

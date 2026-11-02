@@ -68,6 +68,22 @@ describe("parseScene", () => {
     });
   });
 
+  it("treats a library <Video> as a picture layer inside its Sprite", () => {
+    const video = parseScene(`import { Stage, Sprite, Video } from "./animations.jsx";
+export default function Scene() {
+  return (
+    <Stage width={1080} height={1920} duration={12} fps={30}>
+      <Sprite data-layer-id="footage" start={0} end={12} data-layer-name="Footage">
+        <Video data-layer-id="clip" src="media/k3f9x2abcd12.mp4" from={2} />
+      </Sprite>
+    </Stage>
+  );
+}`);
+    expect(video.byId.clip.kind).toBe("image");
+    expect(video.byId.clip.parentId).toBe("footage");
+    expect(video.byId.clip.range).toEqual({ start: 0, end: 12 });
+  });
+
   it("computes ranges: own timing ∩ ancestors, non-Sprites inherit, missing end clips to duration", () => {
     expect(scene.byId.bg.range).toEqual({ start: 0, end: 8 });
     expect(scene.byId.title.range).toEqual({ start: 0.5, end: 4 });

@@ -63,7 +63,7 @@ export type LayerKind =
   | "sprite" // <Sprite start end>
   | "audio" // <Audio src|sfx start end>: a sound clip, timed like a Sprite
   | "text" // element whose only children are text/expressions
-  | "image" // <img> / <Image>
+  | "image" // <img> / <Image> / <video> / <Video>
   | "shape" // <svg>, <div> with no text children, <circle> …
   | "group" // element with element children (container)
   | "canvas" // <Three3D> (a three.js scene) or <canvas>: one drawn layer, no sub-layers inside

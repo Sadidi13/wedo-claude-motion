@@ -1,5 +1,5 @@
 /**
- * JSX templates for the "+ Text / + Image / + Shape / + 3D model / + Sound"
+ * JSX templates for the "+ Text / + Image / + Shape / + Video / + 3D model / + Sound"
  * buttons and the small source helpers around them (clip placement at the
  * playhead, asset paths, making sure `Sprite` / `Three3D` / `Audio` are
  * imported). Pure string builders — the parser's `insertLayer` assigns the
@@ -131,6 +131,13 @@ export function modelLayerTemplate(timing: ClipTiming, assetPath: string, name: 
       state.turntable.rotation.y = localTime * 0.6;
     }}
   />
+</Sprite>`;
+}
+
+/** A library video (`media/<id>.<ext>`) filling the stage, playing from its start (docs/VIDEO.md). */
+export function videoLayerTemplate(timing: ClipTiming, ref: string, name: string): string {
+  return `${spriteOpen(timing, escapeAttr(name))}
+  <Video src="${escapeAttr(ref)}" />
 </Sprite>`;
 }
 

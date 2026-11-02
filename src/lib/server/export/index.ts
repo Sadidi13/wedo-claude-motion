@@ -13,7 +13,7 @@ import { mixAudio } from "./audio";
 import { encode } from "./ffmpeg";
 import { createJob, jobDir, readOptions, readProject, readStatus, writeStatus } from "./jobs";
 import { resolvePlan } from "./plan";
-import { renderJob } from "./renderer";
+import { projectMediaIds, renderJob } from "./renderer";
 import { ExportRequestError } from "./schema";
 
 export { isValidJobId, readProject, readStatus } from "./jobs";
@@ -38,7 +38,8 @@ async function runExportJob(jobId: string, origin: string): Promise<void> {
     const project = await readProject(jobId);
     let soundTrack: string | null = null;
     if (options?.audio !== false && plan.format !== "gif" && audio.length > 0) {
-      const mixed = await mixAudio(jobDir(jobId), audio, plan.range, project?.meta.duration ?? plan.range.end);
+      const mediaIds = project ? projectMediaIds(project) : [];
+      const mixed = await mixAudio(jobDir(jobId), audio, plan.range, project?.meta.duration ?? plan.range.end, mediaIds);
       soundTrack = mixed.file;
       for (const reason of mixed.skipped) console.warn(`[export] job ${jobId}: sound skipped (${reason})`);
     }

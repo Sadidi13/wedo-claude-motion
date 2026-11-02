@@ -71,7 +71,8 @@ describe("SYSTEM_PROMPT", () => {
   });
 
   it("ships a 3D and a GSAP example that pass their own validation as new scenes", () => {
-    const examples = [...SYSTEM_PROMPT.matchAll(/```jsx\n([\s\S]*?)```/g)].map((match) => match[1]);
+    const snippets = [...SYSTEM_PROMPT.matchAll(/```jsx\n([\s\S]*?)```/g)].map((match) => match[1]);
+    const examples = snippets.filter((code) => code.includes("export default function"));
     expect(examples).toHaveLength(2);
     const [threeD, gsap] = examples.map((code) => {
       const result = validateAiOutput({ summary: "example", code }, { scope: "new", entryPath: "scene.jsx" });
@@ -84,6 +85,13 @@ describe("SYSTEM_PROMPT", () => {
     expect(gsap.code).toContain('import { SplitText } from "gsap/SplitText";');
     expect(gsap.code).toContain("useGsapTimeline");
     expect(gsap.scene.layers.map((layer) => layer.name)).toEqual(["Headline"]);
+  });
+
+  it("shows footage as a library <Video> inside a Sprite", () => {
+    const video = [...SYSTEM_PROMPT.matchAll(/```jsx\n([\s\S]*?)```/g)].map((match) => match[1]).find((code) => code.includes("<Video"));
+    expect(video).toContain('<Video src="media/k3f9x2abcd12.mp4"');
+    expect(video).toMatch(/<Sprite start=\{0\} end=\{[\d.]+\}/);
+    expect(SYSTEM_PROMPT).toContain("motion-bridge.mjs media <file>");
   });
 });
 
